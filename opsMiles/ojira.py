@@ -8,7 +8,7 @@ from opsMiles.uname import get_login_cli
 API_ENDPOINT = "https://jira.lsstcorp.org/rest/api/latest/"
 
 
-def set_jira_due_date(user, pw, ms, due_date, jira=None, issue=None):
+def set_jira_due_date(ms, due_date, jira=None, issue=None):
     """
     Update the duedate of the issue in jira - add a comment also
     if jira is passed. If the issue_id is not passed then it will be looked up
@@ -16,8 +16,6 @@ def set_jira_due_date(user, pw, ms, due_date, jira=None, issue=None):
     Could not get the issue,update to work so need to still do rest call for
     that - but add comment used JIRA class.
 
-    :param user: jira user name
-    :param pw: jira passeed
     :param ms: Milesonte ID
     :param due_date: date
     :param jira: optional JIRA object do not pass for no comments
@@ -37,12 +35,10 @@ def set_jira_due_date(user, pw, ms, due_date, jira=None, issue=None):
     issue_id: str = issue.key
     message = "Setting Milestone " + ms + " due date on " + issue_id + " to " + due_date
     print(message)
-    # issue.update just refuses to work ..
     issue.update(duedate=due_date)
+    jira.add_comment(issue_id, message)
 
     # requests.put(API_ENDPOINT + "issue/" + issue_id, auth=(user, pw), json=data)
-    if jira is not None:
-        jira.add_comment(issue_id, message)
 
 
 def list_jira_issues(jira, pred2=None, query=None):

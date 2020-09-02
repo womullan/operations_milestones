@@ -39,8 +39,7 @@ def update_tickets(user,pw,jira=None, report=False):
                     if report:
                         print (f"Should update {t} using {l} date {milestones[l]}")
                     else:
-                         set_jira_due_date(jira=jira,user=user,pw=pw,
-                                           issue=t,
+                         set_jira_due_date(jira=jira, issue=t,
                                            ms=l, due_date=milestones[l])
 
                 else:
@@ -62,6 +61,6 @@ if __name__ == '__main__':
 
     user, pw, jira = get_jira(user)
 
-    #update_tickets(user,pw,jira,report=args.report)
-    update_tickets(user,pw,jira,report=None)
+    update_tickets(user,pw,jira,report=args.report)
+    #update_tickets(user,pw,jira,report=None)
 
