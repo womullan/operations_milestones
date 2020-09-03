@@ -1,7 +1,7 @@
 
 import argparse
 import opsMiles
-from opsMiles.google import get_sheet
+from opsMiles.ogoogle import get_sheet
 from opsMiles.ojira import set_jira_due_date, get_jira, list_jira_issues
 from opsMiles.uname import get_login_cli
 
