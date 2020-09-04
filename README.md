@@ -1,6 +1,6 @@
 # operations_milestones
 
-This script opsMiles.py looks up google milesotnes and sets due dates on jira tickets with the same label.
+This script opsMiles.py looks up google milestones and sets due dates on jira tickets with the same label.
 The -r (report) option will just report on the tickets needing update or not. 
 
 Ask @womullan for client_secret.json which you will need to access google. 
@@ -33,3 +33,9 @@ Alternatively use the Make file as long as $USER is also you Jira user ...
 > make report 
 
 will do all the above.
+
+## Note Jira
+The Jira password is prompted for the first time you use the script. Then it is stored in your
+keychain (I assume this might work on windows no idea) so you are not prompted again. 
+If you do not pass a username you will be prompted for it - this is also the way to refresh the 
+keychain if the password becomes invalid. 
