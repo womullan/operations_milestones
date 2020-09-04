@@ -89,7 +89,5 @@ if __name__ == '__main__':
     user = sys.argv[1]
     user, pw, jira = get_jira(user)
 
-    update_one(jira, user, pw)
-    exit()
     r = list_jira_issues(jira)
     print(r)
