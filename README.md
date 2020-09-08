@@ -7,10 +7,10 @@ Ask @womullan for client_secret.json which you will need to access google.
 
 Use the virtual environment to run this stuff activate it thus :
 
-  >  python -m venv venv 
+      >  python -m venv venv 
 
 For an easy use replace womullan with your Jira ID in:
-
+<pre>
   > source venv/bin/activate 
   > python opsMiles.py -r -u womullan 
 
@@ -25,12 +25,12 @@ For an easy use replace womullan with your Jira ID in:
   PREOPS-86 due 2021-09-30 ok  DP-EX-M08 date 2021-09-30
   PREOPS-85 due 2020-09-30 ok  DP-AP-M01 date 2020-09-30
   got 184 milestones and 11 tickets.
-
+</pre>
 
 
 Alternatively use the Make file as long as $USER is also you Jira user ... 
 
-  > make report 
+      > make report 
 
 will do all the above.
 
