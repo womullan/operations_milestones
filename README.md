@@ -39,3 +39,7 @@ The Jira password is prompted for the first time you use the script. Then it is 
 keychain (I assume this might work on windows no idea) so you are not prompted again. 
 If you do not pass a username you will be prompted for it - this is also the way to refresh the 
 keychain if the password becomes invalid. 
+
+Sometimes Jira still requires you to validate in the browser. If you get login errors go to 
+https://jira.lsstcorp.org/secure/MyJiraHome.jspa
+and make sure you can login.

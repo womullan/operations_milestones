@@ -59,13 +59,14 @@ def list_jira_issues(jira, pred2=None, query=None):
     return r
 
 
-def get_jira(username=None):
+def get_jira(username=None, prompt=False):
     """ Setup up the JIRA object endpoint - prompt
         for username and passwd as needed.
         Password will be looked up from key chain.
     :String username: Optionally pass the username (prompted othereise)
     """
-    user, pw = get_login_cli(username=username)
+
+    user, pw = get_login_cli(username=username,prompt=prompt)
     print("Jira user:" + user)
     ep = "https://jira.lsstcorp.org"
     return (user, pw, JIRA(server=ep, basic_auth=(user, pw)))
