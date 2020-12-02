@@ -3,10 +3,61 @@ import argparse
 import opsMiles
 from opsMiles.ogoogle import get_sheet
 from opsMiles.ojira import set_jira_due_date, get_jira, list_jira_issues
+from opsMiles.ojira import list_milestones
 from opsMiles.uname import get_login_cli
 
 
-def update_tickets(user,pw,jira=None, report=False):
+
+def update_tickets_j(jira=None, report=False):
+    """ Go through the milestones FROM Jira and for each
+    look for a jira ticket with that label and update the due date"""
+
+    # get the milestones with label and date.
+    milestones={}
+    jmiles = list_milestones(jira)
+
+    for m in jmiles:
+        # Custom fileds come out a bit wird this is RO Milestone ID
+        milestone_id = m.fields.customfield_16000
+        due_date = m.fields.duedate
+        if milestone_id and  due_date:
+            milestones[milestone_id]=due_date
+            if report :
+                print(f"{milestone_id} due {due_date}")
+    update_tickets_m(jira, milestones, report)
+
+
+def update_tickets_m(jira, milestones, report):
+    """
+    Given the milestones, look up the tickets and update them
+    :param jira: Logged in Jira
+    :param milestones: list of milestone, due date pairs
+    """
+
+    #get the tickets
+    tickets = list_jira_issues(jira )
+
+    for t in tickets:
+        # for each ticket look at the labels if one of the labels is a
+        # milestone (from list above) then update it
+        # if the date is not correct.
+        for l in t.fields.labels:
+            if l in milestones:
+                if not t.fields.duedate or (t.fields.duedate != milestones[l]):
+                    #dates differ so should update
+                    if report:
+                        print (f"Should update {t} using {l} date {milestones[l]}")
+                    else:
+                        set_jira_due_date(jira=jira, issue=t,
+                                          ms=l, due_date=milestones[l])
+
+                else:
+                    print (f"{t} due {t.fields.duedate} ok  {l} date {milestones[l]}")
+
+    print(f"got {len(milestones)} milestones and {len(tickets)} tickets.")
+
+
+def update_tickets_g(user,pw,jira=None, report=False):
     """ Go through the milestones and for each look for a jira ticket with
     that label and update the due date"""
 
@@ -27,25 +78,8 @@ def update_tickets(user,pw,jira=None, report=False):
 
     #get the tickets
     tickets = list_jira_issues(jira )
+    update_tickets_m(jira, milestones, report)
 
-    for t in tickets:
-        # for each ticket look at the labels if one of the labels is a
-        # milestone (from google list above) then update it
-        # if the date is not correct.
-        for l in t.fields.labels:
-            if l in milestones:
-                if not t.fields.duedate or (t.fields.duedate != milestones[l]):
-                    #dates differ so should update
-                    if report:
-                        print (f"Should update {t} using {l} date {milestones[l]}")
-                    else:
-                         set_jira_due_date(jira=jira, issue=t,
-                                           ms=l, due_date=milestones[l])
-
-                else:
-                    print (f"{t} due {t.fields.duedate} ok  {l} date {milestones[l]}")
-
-    print (f"got {len(milestones)} milestones and {len(tickets)} tickets.")
 
 if __name__ == '__main__':
     description = __doc__
@@ -63,6 +97,5 @@ if __name__ == '__main__':
 
     user, pw, jira = get_jira(user,args.prompt)
 
-    update_tickets(user,pw,jira,report=args.report)
-    #update_tickets(user,pw,jira,report=None)
+    update_tickets_j(jira,report=args.report)
 

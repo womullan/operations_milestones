@@ -8,6 +8,17 @@ from opsMiles.uname import get_login_cli
 API_ENDPOINT = "https://jira.lsstcorp.org/rest/api/latest/"
 
 
+def list_milestones(jira=None):
+    """
+    Get the milestone issues from Jira for PRE-OPS.
+    """
+
+    fields = ["key", "RO Milestone ID", "type", "summary", "duedate"]
+    query = """project = PREOPS AND type = Milestone """
+    r = jira.search_issues(jql_str=query, fields=fields)
+    return r
+
+
 def set_jira_due_date(ms, due_date, jira=None, issue=None):
     """
     Update the duedate of the issue in jira - add a comment also
@@ -55,7 +66,7 @@ def list_jira_issues(jira, pred2=None, query=None):
 
     if (pred2 is not None):
         query = query + " " + pred2
-    r = jira.search_issues(jql_str=query, fields=fields)
+    r = jira.search_issues(jql_str=query, fields=fields, maxResults=500)
     return r
 
 
