@@ -1,5 +1,17 @@
 VENVDIR = venv
 
+list: venv
+	( \
+		source $(VENVDIR)/bin/activate; \
+		python opsMiles.py -l -m txt -u ${USER} \
+	)
+
+table: venv
+	( \
+		source $(VENVDIR)/bin/activate; \
+		python opsMiles.py -l -u ${USER} \
+	)
+
 report: venv
 	( \
 		source $(VENVDIR)/bin/activate; \

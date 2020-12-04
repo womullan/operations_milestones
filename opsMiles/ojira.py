@@ -1,6 +1,5 @@
 import sys
 
-import requests
 from jira import JIRA
 
 from opsMiles.uname import get_login_cli
@@ -8,14 +7,20 @@ from opsMiles.uname import get_login_cli
 API_ENDPOINT = "https://jira.lsstcorp.org/rest/api/latest/"
 
 
-def list_milestones(jira=None):
+def list_milestones(jira=None, pred2="""and (component = "Data Production" or
+                    component = "System Performance")"""):
     """
     Get the milestone issues from Jira for PRE-OPS.
+    Defaults to Data Produciton and System Performance
+    set pred2="" to get all
     """
 
-    fields = ["key", "RO Milestone ID", "type", "summary", "duedate"]
-    query = """project = PREOPS AND type = Milestone """
-    r = jira.search_issues(jql_str=query, fields=fields)
+    fields = ["key", "RO Milestone ID", "type", "summary", "duedate",
+              "Team", "component", "Milestone Level"]
+    query = "project = PREOPS AND type = Milestone " + pred2
+    query = query  +  " order by duedate asc"
+
+    r = jira.search_issues(jql_str=query, fields=fields,  maxResults=500)
     return r
 
 
@@ -34,11 +39,10 @@ def set_jira_due_date(ms, due_date, jira=None, issue=None):
     :return:
     """
 
-    data = {"fields": {"duedate": due_date}}
     if issue is None:
         p2 = " and labels = " + ms
         issues = list_jira_issues(jira, pred2=p2)[0]
-        if issues :
+        if issues:
             issue = issues[0]
         else:
             raise Exception("There is no issue tagged " + ms)
@@ -61,7 +65,7 @@ def list_jira_issues(jira, pred2=None, query=None):
     """
     fields = ["key", "labels", "type", "assignee", "summary", "duedate"]
     if query is None:
-        query = """project = PREOPS AND resolution = Unresolved AND  
+        query = """project = PREOPS AND resolution = Unresolved AND
                    (type = epic or type= story) AND labels is not EMPTY """
 
     if (pred2 is not None):

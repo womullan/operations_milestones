@@ -34,6 +34,22 @@ Alternatively use the Make file as long as $USER is also you Jira user ...
 
 will do all the above.
 
+## Milestones
+Milestones are now also in Jira. You can list them to std out with
+
+<pre>
+  > source venv/bin/activate 
+  > python opsMiles.py -l -m txt -u womullan 
+<pre>
+
+To get the tex table for a document use 
+
+<pre>
+  > python opsMiles.py -l -m tex -u womullan 
+<pre>
+
+This will make a file milestones.tex containing a latex table.
+
 ## Note Jira
 The Jira password is prompted for the first time you use the script. Then it is stored in your
 keychain (I assume this might work on windows no idea) so you are not prompted again. 
