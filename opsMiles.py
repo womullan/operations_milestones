@@ -114,6 +114,8 @@ def output(miles, mode, fname="milestones"):
         
 
 if __name__ == '__main__':
+    pred = """and (component = "Data Production" or component = 
+           "System Performance")"""
     OUTPUT_MODES = ["txt", "tex"]
     description = __doc__
     formatter = argparse.RawDescriptionHelpFormatter
@@ -126,6 +128,9 @@ if __name__ == '__main__':
                         help="""Just report dont update anything.""")
     parser.add_argument('-l', '--list', action='store_true',
                         help="""List milestones""")
+    parser.add_argument('-q', '--query', default = pred,
+                        help=""" Partial predicate for milestones like 
+                        'component = Data Production' """)
     parser.add_argument("-m", "--mode", default="tex", choices=OUTPUT_MODES,
                         help="""Output mode for table.
                                 verbose' displays all the information...""")
@@ -136,6 +141,6 @@ if __name__ == '__main__':
     user, pw, jira = get_jira(user, args.prompt)
 
     if args.list:
-        output(list_milestones(jira), args.mode)
+        output(list_milestones(jira,args.query), args.mode)
     else:
         update_tickets_j(jira, report=args.report)
