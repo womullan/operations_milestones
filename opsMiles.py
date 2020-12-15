@@ -81,7 +81,7 @@ def update_tickets_g(jira=None, report=False):
     update_tickets_m(jira, milestones, report)
 
 
-def output(miles, mode, fname="milestones"):
+def output(miles, mode, fname="milestones", caption=None):
     """
     Given list of milestones output them
     :param miles: list of milestones
@@ -95,7 +95,9 @@ def output(miles, mode, fname="milestones"):
         print(f"Create tex table {fname}")
         tout = open(fname + '.tex', 'w')
         cap = "Milestones for Rubin Observatory Data Production " \
-              "and System Perfomrance  FY21"
+              "and System Performance  FY21"
+        if caption:
+            cap = caption
         form = r"|p{0.3\textwidth}  |r  |r  |r  |r  |p{0.1\textwidth} |"
         outhead(cols, tout=tout, cap=cap, name="miles", form=form)
         sep = "&"
@@ -114,7 +116,7 @@ def output(miles, mode, fname="milestones"):
         
 
 if __name__ == '__main__':
-    pred = """and (component = "Data Production" or component = 
+    pred="""and (component = "Data Production" or component = 
            "System Performance")"""
     OUTPUT_MODES = ["txt", "tex"]
     description = __doc__
@@ -128,9 +130,11 @@ if __name__ == '__main__':
                         help="""Just report dont update anything.""")
     parser.add_argument('-l', '--list', action='store_true',
                         help="""List milestones""")
-    parser.add_argument('-q', '--query', default = pred,
+    parser.add_argument('-q', '--query', default=pred,
                         help=""" Partial predicate for milestones like 
                         'component = Data Production' """)
+    parser.add_argument('-c', '--caption', default=None,
+                        help=""" Caption for the TeX tabel only with -t """)
     parser.add_argument("-m", "--mode", default="tex", choices=OUTPUT_MODES,
                         help="""Output mode for table.
                                 verbose' displays all the information...""")
@@ -141,6 +145,6 @@ if __name__ == '__main__':
     user, pw, jira = get_jira(user, args.prompt)
 
     if args.list:
-        output(list_milestones(jira,args.query), args.mode)
+        output(list_milestones(jira,args.query), args.mode, caption=args.caption)
     else:
         update_tickets_j(jira, report=args.report)
