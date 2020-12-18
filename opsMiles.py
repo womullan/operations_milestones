@@ -1,7 +1,6 @@
 
 import argparse
 import sys
-from opsMiles.ogoogle import get_sheet
 from opsMiles.ojira import set_jira_due_date, get_jira, list_jira_issues
 from opsMiles.ojira import list_milestones
 from opsMiles.otable import outhead, complete_and_close_table, outputrow
@@ -57,28 +56,6 @@ def update_tickets_m(jira, milestones, report):
                           f"{milestones[l]}")
 
     print(f"got {len(milestones)} milestones and {len(tickets)} tickets.")
-
-
-def update_tickets_g(jira=None, report=False):
-    """ Go through the milestones and for each look for a jira ticket with
-    that label and update the due date"""
-
-    # grab the milesons from google
-    sheet = "1RCXFwnVfXgR-WxFO4dfYRZuMX8egz35nABODKANEAUo"
-    tab = "ImpMiles!A2:L"
-    data = get_sheet(sheet, tab)['values']
-
-    # get the milestones with label and date.
-    milestones = {}
-    for m in data:
-        # if anyone changes the columns we have a problem
-        milestone_id = m[0]
-        due_date = m[1]
-        if milestone_id and milestone_id != "#N/A":
-            if due_date:
-                milestones[milestone_id] = due_date
-
-    update_tickets_m(jira, milestones, report)
 
 
 def output(miles, mode, fname="milestones", caption=None):
