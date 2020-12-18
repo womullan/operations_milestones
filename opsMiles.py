@@ -40,20 +40,21 @@ def update_tickets_m(jira, milestones, report):
         # for each ticket look at the labels if one of the labels is a
         # milestone (from list above) then update it
         # if the date is not correct.
-        for l in t.fields.labels:
-            if l in milestones:
-                if not t.fields.duedate or (t.fields.duedate != milestones[l]):
+        for label in t.fields.labels:
+            if label in milestones:
+                if not t.fields.duedate or \
+                        (t.fields.duedate != milestones[label]):
                     # dates differ so should update
                     if report:
-                        print(f"Should update {t} using {l} date "
-                              f"{milestones[l]}")
+                        print(f"Should update {t} using {label} date "
+                              f"{milestones[label]}")
                     else:
                         set_jira_due_date(jira=jira, issue=t,
-                                          ms=l, due_date=milestones[l])
+                                          ms=label, due_date=milestones[label])
 
                 else:
-                    print(f"{t} due {t.fields.duedate} ok  {l} date "
-                          f"{milestones[l]}")
+                    print(f"{t} due {t.fields.duedate} ok  {label} date "
+                          f"{milestones[label]}")
 
     print(f"got {len(milestones)} milestones and {len(tickets)} tickets.")
 
@@ -93,7 +94,7 @@ def output(miles, mode, fname="milestones", caption=None):
         
 
 if __name__ == '__main__':
-    pred="""and (component = "Data Production" or component = 
+    pred = """and (component = "Data Production" or component = 
            "System Performance")"""
     OUTPUT_MODES = ["txt", "tex"]
     description = __doc__
@@ -122,6 +123,7 @@ if __name__ == '__main__':
     user, pw, jira = get_jira(user, args.prompt)
 
     if args.list:
-        output(list_milestones(jira,args.query), args.mode, caption=args.caption)
+        output(list_milestones(jira, args.query), args.mode,
+               caption=args.caption)
     else:
         update_tickets_j(jira, report=args.report)
