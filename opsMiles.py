@@ -69,7 +69,7 @@ def splitMiles(miles):
     dmiles = []
 
     for m in miles:
-        if m.fields.status == "Done":
+        if str(m.fields.status) == "Done":
             dmiles.append(m)
         else:
             omiles.append(m)
@@ -87,7 +87,8 @@ def output(miles, mode, fname="milestones", caption=None, split=False):
     if split:
         openMiles,doneMiles = splitMiles(miles)
         output(openMiles,mode, "openMilestones", caption=caption, split=False)
-        output(openMiles,mode, "doneMilestones", caption=caption, split=False)
+        output(doneMiles,mode, "doneMilestones", caption=caption, split=False)
+        return
 
     cols = ["Milestone", "Jira ID", "Rubin ID", "Due Date", "Level", "Status", "Team"]
     tout = sys.stdout
