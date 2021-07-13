@@ -99,8 +99,8 @@ def output(miles, mode, fname="milestones", caption=None, split=False):
               "and System Performance "
         if caption:
             cap = caption
-        form = r"|p{0.3\textwidth}  |r  |r  |r  |r  |p{0.1\textwidth} |"
-        outhead(cols, tout=tout, cap=cap, name="miles", form=form)
+        form = r"|p{0.3\textwidth}  |r  |r  |r  |r |l |p{0.1\textwidth} |"
+        outhead(cols, tout=tout, cap=cap, name=fname, form=form)
         sep = "&"
 
     for m in miles:
@@ -110,7 +110,8 @@ def output(miles, mode, fname="milestones", caption=None, split=False):
         due = m.fields.duedate
         lev = m.fields.customfield_11600
         team = m.fields.customfield_10502
-        outputrow(tout, sep, sumry, key, milestone_id, due, lev, team, mode)
+        status = m.fields.status
+        outputrow(tout, sep, sumry, key, milestone_id, due, lev, team, status, mode)
 
     if mode == "tex":
         complete_and_close_table(tout)

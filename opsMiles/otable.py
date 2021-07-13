@@ -33,15 +33,15 @@ def outhead(cols, tout, name, cap, form=None):
     return
 
 
-def outputrow(tout, sep, sumry, key, milestone_id, due_date, lev, team, mode):
+def outputrow(tout, sep, sumry, key, milestone_id, due_date, lev, team, status, mode):
     if mode == "tex":
         key = r"\jira{"+key+"}"
         print(f"{fix_tex(sumry)}{sep}{key}{sep}{fix_tex(milestone_id)}{sep}"
-              f"{due_date}{sep}{lev}{sep}{team}", file=tout)
+              f"{due_date}{sep}{lev}{sep}{status}{sep}{team}", file=tout)
         print(r" \\ \hline", file=tout)
     else:
         print(f"{sumry}{sep}{key}{sep}{milestone_id}{sep}{due_date}"
-              f"{sep}{lev}{sep}{team}", file=tout)
+              f"{sep}{lev}{sep}{status}{sep}{team}", file=tout)
 
 
 def fix_tex(text):
