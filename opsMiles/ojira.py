@@ -16,7 +16,7 @@ def list_milestones(jira=None, pred2="""and (component = "Data Production" or
     """
 
     fields = ["key", "RO Milestone ID", "type", "summary", "duedate",
-              "Team", "component", "Milestone Level"]
+              "Team", "component", "Milestone Level", "status"]
     query = "project = PREOPS AND type = Milestone " + pred2
     query = query  +  " order by duedate asc"
 
@@ -63,7 +63,7 @@ def list_jira_issues(jira, pred2=None, query=None):
     :String pred2: If you use the defualt query string but want to
                     add more predicate or sort order start with AND or OR
     """
-    fields = ["key", "labels", "type", "assignee", "summary", "duedate"]
+    fields = ["key", "labels", "type", "assignee", "summary", "duedate", "status"]
     if query is None:
         query = """project = PREOPS AND resolution = Unresolved AND
                    (type = epic or type= story) AND labels is not EMPTY """
