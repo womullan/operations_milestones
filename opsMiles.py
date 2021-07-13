@@ -59,21 +59,44 @@ def update_tickets_m(jira, milestones, report):
     print(f"got {len(milestones)} milestones and {len(tickets)} tickets.")
 
 
-def output(miles, mode, fname="milestones", caption=None):
+def splitMiles(miles):
+    """
+    Given list of milestones split them in done and pending lists
+    :param miles: list of milestones
+    :return: done and pending lists
+    """
+    omiles = []
+    dmiles = []
+
+    for m in miles:
+        if m.fields.status == "Done":
+            dmiles.append(m)
+        else:
+            omiles.append(m)
+
+    return [omiles, dmiles]
+
+def output(miles, mode, fname="milestones", caption=None, split=False):
     """
     Given list of milestones output them
     :param miles: list of milestones
     :param mode: one of OUPUT_MODES
+    :param split: deived into two tables done, not done
     """
 
-    cols = ["Milestone", "Jira ID", "Rubin ID", "Due Date", "Level", "Team"]
+    if split:
+        openMiles,doneMiles = splitMiles(miles)
+        output(openMiles,mode, "openMilestones", caption=caption, split=False)
+        output(openMiles,mode, "doneMilestones", caption=caption, split=False)
+
+    cols = ["Milestone", "Jira ID", "Rubin ID", "Due Date", "Level", "Status", "Team"]
     tout = sys.stdout
     sep = "\t"
     if mode == "tex":
         print(f"Create tex table {fname}")
         tout = open(fname + '.tex', 'w')
         cap = "Milestones for Rubin Observatory Data Production " \
-              "and System Performance  FY21"
+              "and System Performance "
         if caption:
             cap = caption
         form = r"|p{0.3\textwidth}  |r  |r  |r  |r  |p{0.1\textwidth} |"
@@ -108,6 +131,8 @@ if __name__ == '__main__':
                         help="""Just report dont update anything.""")
     parser.add_argument('-l', '--list', action='store_true',
                         help="""List milestones""")
+    parser.add_argument('-s', '--split', action='store_true',
+                        help=""" Split milestones in two lists done and not done""")
     parser.add_argument('-q', '--query', default=pred,
                         help=""" Partial predicate for milestones like 
                         'component = Data Production' """)
@@ -124,6 +149,6 @@ if __name__ == '__main__':
 
     if args.list:
         output(list_milestones(jira, args.query), args.mode,
-               caption=args.caption)
+               caption=args.caption, split=args.split)
     else:
         update_tickets_j(jira, report=args.report)
