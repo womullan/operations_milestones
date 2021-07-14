@@ -69,7 +69,7 @@ def splitMiles(miles):
     dmiles = []
 
     for m in miles:
-        if str(m.fields.status) == "Done":
+        if str(m.fields.status) == "Done" or str(m.fields.status) == "Won't Fix" :
             dmiles.append(m)
         else:
             omiles.append(m)
