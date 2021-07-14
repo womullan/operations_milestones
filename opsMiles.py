@@ -69,7 +69,7 @@ def splitMiles(miles):
     dmiles = []
 
     for m in miles:
-        if m.fields.status == "Done":
+        if str(m.fields.status) == "Done":
             dmiles.append(m)
         else:
             omiles.append(m)
@@ -87,7 +87,8 @@ def output(miles, mode, fname="milestones", caption=None, split=False):
     if split:
         openMiles,doneMiles = splitMiles(miles)
         output(openMiles,mode, "openMilestones", caption=caption, split=False)
-        output(openMiles,mode, "doneMilestones", caption=caption, split=False)
+        output(doneMiles,mode, "doneMilestones", caption=caption, split=False)
+        return
 
     cols = ["Milestone", "Jira ID", "Rubin ID", "Due Date", "Level", "Status", "Team"]
     tout = sys.stdout
@@ -99,8 +100,8 @@ def output(miles, mode, fname="milestones", caption=None, split=False):
               "and System Performance "
         if caption:
             cap = caption
-        form = r"|p{0.3\textwidth}  |r  |r  |r  |r  |p{0.1\textwidth} |"
-        outhead(cols, tout=tout, cap=cap, name="miles", form=form)
+        form = r"|p{0.3\textwidth}  |r  |r  |r  |r |l |p{0.1\textwidth} |"
+        outhead(cols, tout=tout, cap=cap, name=fname, form=form)
         sep = "&"
 
     for m in miles:
@@ -110,7 +111,8 @@ def output(miles, mode, fname="milestones", caption=None, split=False):
         due = m.fields.duedate
         lev = m.fields.customfield_11600
         team = m.fields.customfield_10502
-        outputrow(tout, sep, sumry, key, milestone_id, due, lev, team, mode)
+        status = m.fields.status
+        outputrow(tout, sep, sumry, key, milestone_id, due, lev, team, status, mode)
 
     if mode == "tex":
         complete_and_close_table(tout)
