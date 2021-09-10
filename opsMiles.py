@@ -108,6 +108,8 @@ def output(miles, mode, fname="milestones", caption=None, split=False):
         key = m.key
         sumry = m.fields.summary
         milestone_id = m.fields.customfield_16000
+        if milestone_id is None:
+            milestone_id = "not set"
         due = m.fields.duedate
         lev = m.fields.customfield_11600
         team = m.fields.customfield_10502
