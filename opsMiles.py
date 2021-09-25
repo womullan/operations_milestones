@@ -4,6 +4,7 @@ import sys
 from opsMiles.ojira import set_jira_due_date, get_jira, list_jira_issues
 from opsMiles.ojira import list_milestones
 from opsMiles.otable import outhead, complete_and_close_table, outputrow
+from opsMiles.gantt import gantt
 
 
 def update_tickets_j(jira=None, report=False):
@@ -145,11 +146,17 @@ if __name__ == '__main__':
     parser.add_argument("-m", "--mode", default="tex", choices=OUTPUT_MODES,
                         help="""Output mode for table.
                                 verbose' displays all the information...""")
+    parser.add_argument("-g", "--gantt",action='store_true',
+                        help="""For specfied tickets plot a chart """)
 
     args = parser.parse_args()
     user = args.uname
 
     user, pw, jira = get_jira(user, args.prompt)
+
+    if args.gantt:
+        gantt("USDFplan.tex", list_jira_issues(jira, args.query, "project = PREOPS "))
+        exit(0)
 
     if args.list:
         output(list_milestones(jira, args.query), args.mode,
