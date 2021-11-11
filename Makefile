@@ -1,5 +1,16 @@
 VENVDIR = venv
 
+.FORCE:
+
+USDFplan.tex: venv .FORCE
+	( \
+		source $(VENVDIR)/bin/activate; \
+		python opsMiles.py -g -q "and labels=USDF"  -u ${USER} \
+	)
+
+gantt: USDFplan.tex
+	pdflatex USDFplan.tex 
+
 list: venv
 	( \
 		source $(VENVDIR)/bin/activate; \
