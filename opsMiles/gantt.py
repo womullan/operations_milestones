@@ -1,5 +1,6 @@
 from datetime import datetime
 from io import StringIO
+import sys
 
 from .utility import write_output, format_latex
 
@@ -8,7 +9,7 @@ GANTT_PREAMBLE_STANDALONE = """
 \\documentclass{article}
 \\usepackage[
     paperwidth=26cm,
-    paperheight=10cm,  % Manually tweaked to fit chart
+    paperheight=PHEIGHTcm,  % pass in
     left=0mm,
     top=0mm,
     bottom=0mm,
@@ -54,10 +55,16 @@ def format_gantt(milestones, preamble, postamble, start=datetime(2021, 1, 1)):
         return code.lower().replace("-", "").replace("&", "")
 
     output = StringIO()
-    output.write(preamble)
+    height = 0.6 * len(milestones)  + 0.7
+    opreamble = preamble.replace("PHEIGHT",str(height))
+    output.write(opreamble)
 
     for ms in milestones:
-        ddate = datetime.fromisoformat(ms.fields.duedate)
+        sdate = ms.fields.duedate
+        if sdate:
+            ddate = datetime.fromisoformat(sdate)
+        else:
+            print(f"{ms.key} has no Due Date set", sys.stderr)
         if ms.fields.issuetype.name == "Milestone":
             output_string = (
                 f"\\ganttmilestone[name={get_milestone_name(ms.key)},"
