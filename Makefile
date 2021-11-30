@@ -5,7 +5,7 @@ VENVDIR = venv
 USDFplan.tex: venv .FORCE
 	( \
 		source $(VENVDIR)/bin/activate; \
-		python opsMiles.py -g -q "and labels=USDF"  -u ${USER} \
+		python opsMiles.py -g -q "and labels=USDF AND type  != story"  -u ${USER} \
 	)
 
 gantt: USDFplan.tex
