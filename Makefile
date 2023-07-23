@@ -2,6 +2,21 @@ VENVDIR = venv
 
 .FORCE:
 
+jor.tex: venv .FORCE
+	( \
+		source $(VENVDIR)/bin/activate; \
+		python opsMiles.py -g -f "and filter=23364"  -u ${USER} \
+	)
+
+FY23.tex: venv .FORCE
+	( \
+		source $(VENVDIR)/bin/activate; \
+		python opsMiles.py -g -q "and labels=FY23 and type  != story"  -u ${USER} \
+	)
+
+FY23.pdf:  FY23.tex
+	pdflatex FY23.tex
+
 USDFplan.tex: venv .FORCE
 	( \
 		source $(VENVDIR)/bin/activate; \
