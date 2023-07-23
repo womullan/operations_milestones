@@ -1,0 +1,5 @@
+jira
+google
+oauth2client
+xlrd
+keyring

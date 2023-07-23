@@ -161,8 +161,8 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=description,
                                      formatter_class=formatter)
     parser.add_argument('-u', '--uname', help="""Username for Jira .""")
-    parser.add_argument('-p', '--prompt', action='store_true',
-                        help="""Prompt for Jira Password.""")
+    parser.add_argument('-p', '--pass', default=None,
+                        help="""Jira Password for user.""")
     parser.add_argument('-r', '--report', action='store_true',
                         help="""Just report dont update anything.""")
     parser.add_argument('-l', '--list', action='store_true',
