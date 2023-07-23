@@ -2,7 +2,7 @@
 import argparse
 import sys
 from opsMiles.ojira import set_jira_due_date, get_jira, list_jira_issues
-from opsMiles.ojira import list_milestones
+from opsMiles.ojira import list_milestones, get_last_comment
 from opsMiles.otable import outhead, complete_and_close_table, outputrow
 from opsMiles.gantt import gantt
 
@@ -119,7 +119,38 @@ def output(miles, mode, fname="milestones", caption=None, split=False):
 
     if mode == "tex":
         complete_and_close_table(tout)
-        
+
+
+
+def jor(outfile):
+    """ Create a JOR report from the issues"""
+    tout = open(outfile, 'w')
+    # names for the csv
+    cols = ["Issue key","Rec#","Summary","Report date","Due Date","Implementation Status",
+            "Description","Response","Implementation Status Description"]
+    # names in jira
+    fields = ["key", "RR Item ID", "summary", "labels", "due", "Implementation Status",
+            "description", "Review Response"]
+    issues = list_jira_issues(jira, args.query, "project = PREOPS ", order="", fields=fields)
+    print (f"Create {outfile} with {len(issues)} issues")
+    header = ",".join(cols)
+    print(header, file=tout)
+
+    for i in issues:
+        key = i.key
+        recnum= i.fields.customfield_14813
+        summary = i.fields.summary
+        repdate = i.fields.labels[0]
+        due = i.fields.duedate
+        status = i.fields.customfield_17207
+        description = i.fields.description
+        reposnse = i.fields.customfield_12104
+        isd = get_last_comment(jira, i.key)
+        print(f'{key},{recnum},"{summary}",{repdate},{due},"{status}","{description}",'
+              f'"{reposnse}","{isd}"', file=tout)
+
+    tout.close()
+
 
 if __name__ == '__main__':
     pred = """and (component = "Data Production" or component = 
@@ -148,6 +179,8 @@ if __name__ == '__main__':
                                 verbose' displays all the information...""")
     parser.add_argument("-g", "--gantt",action='store_true',
                         help="""For specfied tickets plot a chart """)
+    parser.add_argument("-j", "--jor",action='store_true',
+                        help="""Joint Operations Review actions report""")
 
     args = parser.parse_args()
     user = args.uname
@@ -156,6 +189,10 @@ if __name__ == '__main__':
 
     if args.gantt:
         gantt("USDFplan.tex", list_jira_issues(jira, args.query, "project = PREOPS "))
+        exit(0)
+
+    if args.jor:
+        jor("jor.csv")
         exit(0)
 
     if args.list:

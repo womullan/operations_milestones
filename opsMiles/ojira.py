@@ -24,11 +24,11 @@ def list(jira=None, fields=FIELDS, pred2=""):
     r = jira.search_issues(jql_str=query, fields=fields,  maxResults=500)
     return r
 
-def list_milestones(jira=None, pred2="""and (component = "Data Production" or
+def list_milestones(jira=None, pred2="""and (component = "Data Management" or
                     component = "System Performance")"""):
     """
     Get the milestone issues from Jira for PRE-OPS.
-    Defaults to Data Produciton and System Performance
+    Defaults to Data Management and System Performance
     set pred2="" to get all
     """
 
@@ -72,14 +72,13 @@ def set_jira_due_date(ms, due_date, jira=None, issue=None):
     # requests.put(API_ENDPOINT + "issue/" + issue_id, auth=(user, pw), json=data)
 
 
-def list_jira_issues(jira, pred2=None, query=None, order="order by duedate asc"):
+def list_jira_issues(jira, pred2=None, query=None, order="order by duedate asc", fields=FIELDS):
     """
     :JIRA jira: setup up JIRA object
     :String query: Query string "
     :String pred2: If you use the defualt query string but want to
                     add more predicate or sort order start with AND or OR
     """
-    fields = FIELDS
     if query is None:
         query = """project = PREOPS AND resolution = Unresolved AND
                    (type = epic or type= story) AND labels is not EMPTY """
@@ -115,6 +114,21 @@ def update_one(jira, user, pw):
     ddate = "2020-09-10"
     set_jira_due_date(jira, user, pw, ms, r, ddate)
     # issue.update(duedate=ddate)
+
+
+def get_last_comment(jira, key):
+    """ Get the last comment on the issue
+    :param jira:
+    :param key:
+    :return: String
+    """
+    issue = jira.issue(key)
+    comments = issue.fields.comment.comments
+    if comments:
+        return comments[-1].body
+    return ""
+
+
 
 
 if __name__ == '__main__':
