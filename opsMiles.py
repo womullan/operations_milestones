@@ -161,8 +161,9 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=description,
                                      formatter_class=formatter)
     parser.add_argument('-u', '--uname', help="""Username for Jira .""")
-    parser.add_argument('-p', '--pass', default=None,
-                        help="""Jira Password for user.""")
+    parser.add_argument('-p', '--passwd', help="""Jira Password for user.""")
+    parser.add_argument('-a', '--ask', action='store_true',
+                        help="""Ask for Jira Password for user.""")
     parser.add_argument('-r', '--report', action='store_true',
                         help="""Just report dont update anything.""")
     parser.add_argument('-l', '--list', action='store_true',
@@ -185,7 +186,7 @@ if __name__ == '__main__':
     args = parser.parse_args()
     user = args.uname
 
-    user, pw, jira = get_jira(user, args.prompt)
+    user, pw, jira = get_jira(user, args.ask, args.passwd)
 
     if args.gantt:
         gantt("USDFplan.tex", list_jira_issues(jira, args.query, "project = PREOPS "))
