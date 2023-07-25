@@ -1,5 +1,6 @@
 
 import argparse
+import io
 import sys
 from opsMiles.ojira import set_jira_due_date, get_jira, list_jira_issues
 from opsMiles.ojira import list_milestones, get_last_comment
@@ -139,15 +140,17 @@ def jor(outfile):
     for i in issues:
         key = i.key
         recnum= i.fields.customfield_14813
-        summary = i.fields.summary
+        summary = i.fields.summary.strip()
         repdate = i.fields.labels[0]
         due = i.fields.duedate
         status = i.fields.customfield_17207
-        description = i.fields.description
+        description = i.fields.description.strip()
         reposnse = i.fields.customfield_12104
-        isd = get_last_comment(jira, i.key)
+        isd = get_last_comment(jira, i.key).strip()
+        tmp: io.StringIO = io.StringIO()
         print(f'{key},{recnum},"{summary}",{repdate},{due},"{status}","{description}",'
-              f'"{reposnse}","{isd}"', file=tout)
+              f'"{reposnse}","{isd}"', file=tmp)
+        print(tmp.getvalue().replace("\r", ""), file=tout)
 
     tout.close()
 
