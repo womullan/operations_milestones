@@ -20,7 +20,7 @@ jobs:
           submodules: true
 
       - name: Update milestones submodule
-        run: git submodule update --remote --force ops_milestones
+        run: git submodule update --remote --force operations_milestones
 
       - name: Check diff
         run: | #  set an environment variable
