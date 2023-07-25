@@ -2,10 +2,10 @@ VENVDIR = venv
 
 .FORCE:
 
-jor.tex: venv .FORCE
+jor.csv: venv .FORCE
 	( \
 		source $(VENVDIR)/bin/activate; \
-		python opsMiles.py -g -f "and filter=23364"  -u ${USER} \
+		python opsMiles.py -j -q "and filter=23364"  -u ${USER} \
 	)
 
 FY23.tex: venv .FORCE
