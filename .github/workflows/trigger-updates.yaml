@@ -37,7 +37,7 @@ jobs:
         run: |
           git config user.name github-actions
           git config user.email github-actions@github.com
-          git add milestones
+          git add operations_milestones
           git commit -m "Update milestones submodule"
 
       - name: Get date
@@ -54,9 +54,9 @@ jobs:
           #IF i leave someone needs to make a new PAT
           branch: update-milestones
           branch-suffix: short-commit-hash
-          title: Automatic milestone submodule update, ${{ steps.get-date.outputs.date }}
+          title: Automatic operations_milestones submodule update, ${{ steps.get-date.outputs.date }}
           commit-message: Auto Milestones submodule update
-          body: Update milestones submodule so doc is regenerated.
+          body: Update operations_milestones submodule so doc is regenerated.
 
 
       # auto merge for dmtn-232 is a too public so will manually check and merge it
