@@ -3,3 +3,4 @@ google
 oauth2client
 xlrd
 keyring
+rstcloth

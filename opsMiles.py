@@ -4,6 +4,7 @@ import io
 import sys
 from opsMiles.ojira import set_jira_due_date, get_jira, list_jira_issues
 from opsMiles.ojira import list_milestones, get_last_comment
+from opsMiles.orst import jordoc
 from opsMiles.otable import outhead, complete_and_close_table, outputrow
 from opsMiles.gantt import gantt
 
@@ -136,6 +137,7 @@ def jor(outfile):
     print (f"Create {outfile} with {len(issues)} issues")
     header = ",".join(cols)
     print(header, file=tout)
+    rows = []
 
     for i in issues:
         key = i.key
@@ -150,9 +152,12 @@ def jor(outfile):
         tmp: io.StringIO = io.StringIO()
         print(f'{key},{recnum},"{summary}",{repdate},{due},"{status}","{description}",'
               f'"{reposnse}","{isd}"', file=tmp)
+        keylink = f"`{key} <https://ls.st/{key}>`_"
+        row = [keylink, recnum, summary, repdate, due, status, description, reposnse, isd]
+        rows.append(row)
         print(tmp.getvalue().replace("\r", ""), file=tout)
-
     tout.close()
+    jordoc(cols,rows)
 
 
 if __name__ == '__main__':
