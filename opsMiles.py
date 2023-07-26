@@ -1,8 +1,10 @@
 
 import argparse
+import io
 import sys
 from opsMiles.ojira import set_jira_due_date, get_jira, list_jira_issues
 from opsMiles.ojira import list_milestones, get_last_comment
+from opsMiles.orst import jordoc
 from opsMiles.otable import outhead, complete_and_close_table, outputrow
 from opsMiles.gantt import gantt
 
@@ -135,21 +137,27 @@ def jor(outfile):
     print (f"Create {outfile} with {len(issues)} issues")
     header = ",".join(cols)
     print(header, file=tout)
+    rows = []
 
     for i in issues:
         key = i.key
         recnum= i.fields.customfield_14813
-        summary = i.fields.summary
+        summary = i.fields.summary.strip()
         repdate = i.fields.labels[0]
         due = i.fields.duedate
         status = i.fields.customfield_17207
-        description = i.fields.description
+        description = i.fields.description.strip()
         reposnse = i.fields.customfield_12104
-        isd = get_last_comment(jira, i.key)
+        isd = get_last_comment(jira, i.key).strip()
+        tmp: io.StringIO = io.StringIO()
         print(f'{key},{recnum},"{summary}",{repdate},{due},"{status}","{description}",'
-              f'"{reposnse}","{isd}"', file=tout)
-
+              f'"{reposnse}","{isd}"', file=tmp)
+        keylink = f"`{key} <https://ls.st/{key}>`_"
+        row = [keylink, recnum, summary, repdate, due, status, description, reposnse, isd]
+        rows.append(row)
+        print(tmp.getvalue().replace("\r", ""), file=tout)
     tout.close()
+    jordoc(cols,rows)
 
 
 if __name__ == '__main__':
@@ -161,8 +169,9 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=description,
                                      formatter_class=formatter)
     parser.add_argument('-u', '--uname', help="""Username for Jira .""")
-    parser.add_argument('-p', '--prompt', action='store_true',
-                        help="""Prompt for Jira Password.""")
+    parser.add_argument('-p', '--passwd', help="""Jira Password for user.""")
+    parser.add_argument('-a', '--ask', action='store_true',
+                        help="""Ask for Jira Password for user.""")
     parser.add_argument('-r', '--report', action='store_true',
                         help="""Just report dont update anything.""")
     parser.add_argument('-l', '--list', action='store_true',
@@ -185,7 +194,7 @@ if __name__ == '__main__':
     args = parser.parse_args()
     user = args.uname
 
-    user, pw, jira = get_jira(user, args.prompt)
+    user, pw, jira = get_jira(user, args.ask, args.passwd)
 
     if args.gantt:
         gantt("USDFplan.tex", list_jira_issues(jira, args.query, "project = PREOPS "))
