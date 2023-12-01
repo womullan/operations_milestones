@@ -124,11 +124,18 @@ def output(miles, mode, fname="milestones", caption=None, split=False):
         complete_and_close_table(tout)
 
 
+def getComponentsStr(components):
+    componentlist = []
+    for c in components:
+        componentlist.append(c.name)
+
+    return ",".join(componentlist)
+
 def pop(outfile):
     """ Create a POP report from the issues"""
     tout = open(outfile, 'w')
     # names for the csv
-    cols = ["Issue key","Summary","Assignee","Due Date","Component"]
+    cols = ["Issue key","Summary","Assignee","Due Date","Component","Implementation Status Description"]
     # names in jira
     fields = ["key", "summary", "assignee", "due", "components"]
     issues = list_jira_issues(jira, args.query, "project = PREOPS ", order="", fields=fields)
@@ -142,7 +149,7 @@ def pop(outfile):
         summary = i.fields.summary.strip()
         due = i.fields.duedate
         assignee = i.fields.assignee
-        components = i.fields.components
+        components = getComponentsStr(i.fields.components)
         isd = get_last_comment(jira, i.key).strip()
         tmp: io.StringIO = io.StringIO()
         print(f'{key},"{summary}",{assignee},{due},"{components}","{isd}"', file=tmp)
