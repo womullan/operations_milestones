@@ -135,9 +135,9 @@ def pop(outfile):
     """ Create a POP report from the issues"""
     tout = open(outfile, 'w')
     # names for the csv
-    cols = ["Issue key","Summary","Assignee","Due Date","Component","Implementation Status Description"]
+    cols = ["Issue key","Summary","Assignee","Due Date","Component","Status", "Implementation Status Description"]
     # names in jira
-    fields = ["key", "summary", "assignee", "due", "components"]
+    fields = ["key", "summary", "assignee", "due", "components", "status"]
     issues = list_jira_issues(jira, args.query, "project = PREOPS ", order="", fields=fields)
     print (f"Create {outfile} with {len(issues)} issues")
     header = ",".join(cols)
@@ -150,11 +150,12 @@ def pop(outfile):
         due = i.fields.duedate
         assignee = i.fields.assignee
         components = getComponentsStr(i.fields.components)
+        status = i.fields.status
         isd = get_last_comment(jira, i.key).strip()
         tmp: io.StringIO = io.StringIO()
-        print(f'{key},"{summary}",{assignee},{due},"{components}","{isd}"', file=tmp)
+        print(f'{key},"{summary}",{assignee},{due},"{components}","{status}","{isd}"', file=tmp)
         keylink = f"`{key} <https://ls.st/{key}>`_ "
-        row = [keylink, summary, assignee, due, components, isd]
+        row = [keylink, summary, assignee, due, components, status, isd]
         rows.append(row)
         print(tmp.getvalue().replace("\r", ""), file=tout)
     tout.close()
