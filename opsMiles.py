@@ -5,6 +5,7 @@ import sys
 from opsMiles.ojira import set_jira_due_date, get_jira, list_jira_issues
 from opsMiles.ojira import list_milestones, get_last_comment
 from opsMiles.orst import jordoc
+from opsMiles.orpop import popdoc
 from opsMiles.otable import outhead, complete_and_close_table, outputrow
 from opsMiles.gantt import gantt
 
@@ -123,6 +124,34 @@ def output(miles, mode, fname="milestones", caption=None, split=False):
         complete_and_close_table(tout)
 
 
+def pop(outfile):
+    """ Create a POP report from the issues"""
+    tout = open(outfile, 'w')
+    # names for the csv
+    cols = ["Issue key","Summary","Assignee","Due Date","Component"]
+    # names in jira
+    fields = ["key", "summary", "assignee", "due", "components"]
+    issues = list_jira_issues(jira, args.query, "project = PREOPS ", order="", fields=fields)
+    print (f"Create {outfile} with {len(issues)} issues")
+    header = ",".join(cols)
+    print(header, file=tout)
+    rows = []
+
+    for i in issues:
+        key = i.key
+        summary = i.fields.summary.strip()
+        due = i.fields.duedate
+        assignee = i.fields.assignee
+        components = i.fields.components
+        isd = get_last_comment(jira, i.key).strip()
+        tmp: io.StringIO = io.StringIO()
+        print(f'{key},"{summary}",{assignee},{due},"{components}","{isd}"', file=tmp)
+        keylink = f"`{key} <https://ls.st/{key}>`_ "
+        row = [keylink, summary, assignee, due, components, isd]
+        rows.append(row)
+        print(tmp.getvalue().replace("\r", ""), file=tout)
+    tout.close()
+    popdoc(cols,rows)
 
 def jor(outfile):
     """ Create a JOR report from the issues"""
@@ -190,6 +219,8 @@ if __name__ == '__main__':
                         help="""For specfied tickets plot a chart """)
     parser.add_argument("-j", "--jor",action='store_true',
                         help="""Joint Operations Review actions report""")
+    parser.add_argument("-x", "--pop",action='store_true',
+                        help="""Joint Operations POP report""")
 
     args = parser.parse_args()
     user = args.uname
@@ -202,6 +233,10 @@ if __name__ == '__main__':
 
     if args.jor:
         jor("jor.csv")
+        exit(0)
+
+    if args.pop:
+        pop("pop.csv")
         exit(0)
 
     if args.list:
