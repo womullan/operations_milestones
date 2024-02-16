@@ -2,9 +2,11 @@ import sys
 
 from jira import JIRA
 
-from opsMiles.uname import get_login_cli
+from opsMiles.uname import get_from_keyring
 
-API_ENDPOINT = "https://jira.lsstcorp.org/rest/api/latest/"
+#API_ENDPOINT = "https://jira.lsstcorp.org/rest/api/latest/"
+EP = "https://rubinobs.atlassian.net"
+API_ENDPOINT = f"{EP}/rest/api/latest/"
 
 MFIELDS = ["key", "RO Milestone ID", "type", "summary", "duedate", "startdate",
           "Team", "component", "Milestone Level", "status"]
@@ -24,8 +26,8 @@ def list(jira=None, fields=FIELDS, pred2=""):
     r = jira.search_issues(jql_str=query, fields=fields,  maxResults=500)
     return r
 
-def list_milestones(jira=None, pred2="""and (component = "Data Management" or
-                    component = "System Performance")"""):
+def list_milestones(jira=None, pred2='and (component in ("Data Management", '
+                                     '"System Performance")'):
     """
     Get the milestone issues from Jira for PRE-OPS.
     Defaults to Data Management and System Performance
@@ -100,10 +102,9 @@ def get_jira(username=None, prompt=False, password=None):
     user = username
     pw = password
     if password is None:
-        user, pw = get_login_cli(username=username,prompt=prompt)
-    print("Jira user:" + user)
-    ep = "https://jira.lsstcorp.org"
-    return (user, pw, JIRA(server=ep, basic_auth=(user, pw)))
+        user, pw = get_from_keyring(username=username, prompt=prompt)
+    print(f"Jira user: {user} end point: {EP}")
+    return (user, pw, JIRA(server=EP, basic_auth=(user, pw)))
 
 
 def update_one(jira, user, pw):

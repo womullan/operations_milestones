@@ -1,7 +1,7 @@
 import keyring
 
 
-def get_login_cli(service="jira_rest", username=None, prompt=False):
+def get_from_keyring(service="jira_rest", username=None, prompt=False):
     """
     Get the password for the username out of the keyring.  If the password
     isn't found in the keyring, ask for it from the command line.

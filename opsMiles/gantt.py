@@ -73,7 +73,7 @@ def format_gantt(milestones, preamble, postamble, start=datetime(2021, 1, 1)):
                 f"{{{get_month_number(start, ddate)}}} \\ganttnewline"
             )
         else:
-            startdate = ms.fields.customfield_11303
+            startdate = ms.raw['fields']['Start date']
             if startdate == None :
                 print(f" {ms.key} has no Start Date ")
                 startdate = "2021-07-01"

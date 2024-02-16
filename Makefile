@@ -1,4 +1,5 @@
 VENVDIR = venv
+USER='womullan@lsst.org'
 
 .FORCE:
 

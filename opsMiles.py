@@ -100,7 +100,7 @@ def output(miles, mode, fname="milestones", caption=None, split=False):
     if mode == "tex":
         print(f"Create tex table {fname}")
         tout = open(fname + '.tex', 'w')
-        cap = "Milestones for Rubin Observatory Data Production " \
+        cap = "Milestones for Rubin Observatory Data Management " \
               "and System Performance "
         if caption:
             cap = caption
@@ -111,12 +111,12 @@ def output(miles, mode, fname="milestones", caption=None, split=False):
     for m in miles:
         key = m.key
         sumry = m.fields.summary
-        milestone_id = m.fields.customfield_16000
+        milestone_id = m.fields.customfield_10105
         if milestone_id is None:
             milestone_id = "not set"
         due = m.fields.duedate
-        lev = m.fields.customfield_11600
-        team = m.fields.customfield_10502
+        lev = m.fields.customfield_10037
+        team = m.raw['fields']['Team']
         status = m.fields.status
         outputrow(tout, sep, sumry, key, milestone_id, due, lev, team, status, mode)
 
@@ -178,13 +178,13 @@ def jor(outfile):
 
     for i in issues:
         key = i.key
-        recnum= i.fields.customfield_14813
+        recnum= i.fields.customfield_10148
         summary = i.fields.summary.strip()
         repdate = i.fields.labels[0]
         due = i.fields.duedate
-        status = i.fields.customfield_17207
+        status = i.fields.customfield_10195
         description = i.fields.description.strip()
-        reposnse = i.fields.customfield_12104
+        reposnse = i.fields.customfield_10147
         isd = get_last_comment(jira, i.key).strip()
         tmp: io.StringIO = io.StringIO()
         print(f'{key},{recnum},"{summary}",{repdate},{due},"{status}","{description}",'
@@ -198,7 +198,7 @@ def jor(outfile):
 
 
 if __name__ == '__main__':
-    pred = """and (component = "Data Production" or component = 
+    pred = """and (component = "Data Management" or component = 
            "System Performance")"""
     OUTPUT_MODES = ["txt", "tex"]
     description = __doc__
@@ -217,7 +217,7 @@ if __name__ == '__main__':
                         help=""" Split milestones in two lists done and not done""")
     parser.add_argument('-q', '--query', default=pred,
                         help=""" Partial predicate for milestones like 
-                        'component = Data Production' """)
+                        'component = Data Management' """)
     parser.add_argument('-c', '--caption', default=None,
                         help=""" Caption for the TeX tabel only with -t """)
     parser.add_argument("-m", "--mode", default="tex", choices=OUTPUT_MODES,
