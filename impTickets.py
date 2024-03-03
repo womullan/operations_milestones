@@ -61,7 +61,7 @@ def create_tickets(jira):
 
 
 if __name__ == '__main__':
-    pred = """and (component = "Data Production" or component = 
+    pred = """and (component = "Data Management" or component = 
            "System Performance")"""
     OUTPUT_MODES = ["txt", "tex"]
     description = __doc__

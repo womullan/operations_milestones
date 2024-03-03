@@ -1,11 +1,18 @@
 VENVDIR = venv
+USER='rubinjiraapiaccess@gmail.com'
 
 .FORCE:
 
 jor.csv: venv .FORCE
 	( \
 		source $(VENVDIR)/bin/activate; \
-		python opsMiles.py -j -q "and filter=23364"  -u ${USER} \
+		python opsMiles.py -j -q "and filter=11340"  -u ${USER} \
+	)
+
+pop.csv: venv .FORCE
+	( \
+		source $(VENVDIR)/bin/activate; \
+		python opsMiles.py --pop -q "and filter=11342"  -u ${USER} \
 	)
 
 FY23.tex: venv .FORCE
