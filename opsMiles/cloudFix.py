@@ -1,3 +1,4 @@
+import argparse
 import json
 import sys
 from opsMiles.ojira import list_jira_issues, get_jira
@@ -22,12 +23,36 @@ def fix_start_date(jira, project, user, pw):
             print(f"No start date on {issue.key}")
 
 
+def filters(jira):
+    """ For all filters for user pull them down  """
+    filters = {jira.filter(11342), jira.filter(11340)}
+
+
+    for f in filters:
+        print(f" {f}")
+
 if __name__ == '__main__':
-    """ Will  fix start date issues"""
-    user = sys.argv[1]
-    project = sys.argv[2]
-    user, pw, jira = get_jira(user)
 
-    r = fix_start_date(jira, project, user, pw)
+    description = """Fix cloud issues"""
+    formatter = argparse.RawDescriptionHelpFormatter
+    parser = argparse.ArgumentParser(description=description,
+                                     formatter_class=formatter)
+    parser.add_argument('-u', '--uname', help="""Username for Jira .""")
+    parser.add_argument('-p', '--passwd', help="""Jira Password for user.""")
+    parser.add_argument('-a', '--ask', action='store_true',
+                        help="""Ask for Jira Password for user.""")
+    parser.add_argument('-f', '--filter', action='store_true',
+                        help="""Do filter thing.""")
+    parser.add_argument('--project', help="""Project to fix start dates on.""")
+    args = parser.parse_args()
+    user = args.uname
 
-    print(r)
+    user, pw, jira = get_jira(user, args.passwd, args.ask)
+
+    if args.filter:
+        filters(jira)
+    else:
+        """ Will  fix start date issues"""
+        project = args.project
+        fix_start_date(jira, project, user, pw)
+
