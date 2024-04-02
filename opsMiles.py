@@ -3,12 +3,12 @@ import argparse
 import io
 import sys
 from opsMiles.ojira import set_jira_due_date, get_jira, list_jira_issues
-from opsMiles.ojira import list_milestones, get_last_comment
+from opsMiles.ojira import list_milestones, get_last_comment, get_login_config
 from opsMiles.orst import jordoc
 from opsMiles.orpop import popdoc
 from opsMiles.otable import outhead, complete_and_close_table, outputrow
 from opsMiles.gantt import gantt
-
+from jiraone import issue_export, LOGIN
 
 def update_tickets_j(jira=None, report=False):
     """ Go through the milestones FROM Jira and for each
@@ -196,6 +196,12 @@ def jor(outfile):
     tout.close()
     jordoc(cols,rows)
 
+def dump(outfile, args):
+    """ Create a csv report from the issues"""
+    config = get_login_config(args)
+    LOGIN(**config)
+    issue_export(jql=args.query, final_file=outfile)
+
 
 if __name__ == '__main__':
     pred = """and (component = "Data Management" or component = 
@@ -229,6 +235,8 @@ if __name__ == '__main__':
                         help="""Joint Operations Review actions report""")
     parser.add_argument("-x", "--pop",action='store_true',
                         help="""Joint Operations POP report""")
+    parser.add_argument("-d", "--dump",action='store_true',
+                        help="""Just dump csv """)
 
     args = parser.parse_args()
     user = args.uname
@@ -245,6 +253,10 @@ if __name__ == '__main__':
 
     if args.pop:
         pop("pop.csv")
+        exit(0)
+
+    if args.dump:
+        dump("jira.csv", args)
         exit(0)
 
     if args.list:

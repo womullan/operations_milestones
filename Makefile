@@ -3,6 +3,12 @@ USER='rubinjiraapiaccess@gmail.com'
 
 .FORCE:
 
+jira.csv: venv .FORCE
+	( \
+		source $(VENVDIR)/bin/activate; \
+		python opsMiles.py -d -q "filter=11498"  -u ${USER} \
+	)
+
 jor.csv: venv .FORCE
 	( \
 		source $(VENVDIR)/bin/activate; \

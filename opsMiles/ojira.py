@@ -88,7 +88,7 @@ def list_jira_issues(jira, pred2=None, query=None, order="order by duedate asc",
     if (pred2 is not None):
         query = query + " " + pred2
     query = query + " " + order
-    r = jira.search_issues(jql_str=query, fields=fields, maxResults=500)
+    r = jira.search_issues(jql_str=query, fields=fields, maxResults=False)
     return r
 
 
@@ -106,6 +106,13 @@ def get_jira(username=None, prompt=False, password=None):
     print(f"Jira user: {user} end point: {EP}")
     return (user, pw, JIRA(server=EP, basic_auth=(user, pw)))
 
+def get_login_config(args):
+    username = args.uname
+    user, pw = get_from_keyring(username=username, prompt=args.ask)
+    print(f"Jira user: {user} end point: {EP}")
+    return ({"user": f"{username}",
+            "password": f"{pw}",
+            "url": f"{EP}"})
 
 def update_one(jira, user, pw):
     """ update due date on specific milestone as a test"""
