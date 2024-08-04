@@ -56,6 +56,7 @@ def format_gantt(milestones, preamble, postamble, start=datetime(2021, 1, 1)):
     output.write(opreamble)
 
     for ms in milestones:
+        ddate = None
         sdate = ms.fields.duedate
         if sdate:
             ddate = datetime.fromisoformat(sdate)
@@ -74,6 +75,8 @@ def format_gantt(milestones, preamble, postamble, start=datetime(2021, 1, 1)):
                 print(f" {ms.key} has no Start Date ")
                 startdate = "2021-07-01"
             sdate = datetime.fromisoformat(startdate)
+            if not ddate:
+                ddate=sdate
             output_string = (
                 f"\\ganttbar[name={get_milestone_name(ms.key)},"
                 f"progress label text={ms.fields.summary}"
@@ -99,7 +102,7 @@ def gantt_standalone(milestones, start):
       \\gantttitle{{{years[2]}}}{{12}}
       \\ganttnewline\n
     """
-    
+
     return format_gantt(
         milestones,
         GANTT_PREAMBLE_STANDALONE + DATES,

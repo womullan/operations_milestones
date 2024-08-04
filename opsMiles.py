@@ -255,7 +255,7 @@ if __name__ == '__main__':
         start=2021
         if args.year:
             start=args.year
-        gantt(fname, list_jira_issues(jira, args.query, "project = PREOPS "), start=start)
+        gantt(fname, list_jira_issues(jira, args.query, ""), start=start)
         exit(0)
 
     if args.jor:
