@@ -237,6 +237,8 @@ if __name__ == '__main__':
                         help="""Just report dont update anything.""")
     parser.add_argument('-s', '--split', action='store_true',
                         help=""" Split milestones in two lists done and not done""")
+    parser.add_argument('-t', '--tickets', action='store_true',
+                        help="""List any ticket/issue incomplete""")
     parser.add_argument('-u', '--uname', help="""Username for Jira .""")
     parser.add_argument("-x", "--pop",action='store_true',
                         help="""Joint Operations POP report""")
@@ -268,6 +270,11 @@ if __name__ == '__main__':
 
     if args.dump:
         dump("jira.csv", args)
+        exit(0)
+
+    if args.tickets:
+        output(list_jira_issues(jira, args.query, ""), args.mode,
+               caption=args.caption, split=args.split)
         exit(0)
 
     if args.list:
