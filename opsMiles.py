@@ -2,6 +2,8 @@
 import argparse
 import io
 import sys
+from datetime import datetime
+
 from opsMiles.ojira import set_jira_due_date, get_jira, list_jira_issues
 from opsMiles.ojira import list_milestones, get_last_comment, get_login_config
 from opsMiles.orst import jordoc
@@ -238,6 +240,8 @@ if __name__ == '__main__':
     parser.add_argument('-u', '--uname', help="""Username for Jira .""")
     parser.add_argument("-x", "--pop",action='store_true',
                         help="""Joint Operations POP report""")
+    parser.add_argument("-y", "--year", default=2024, type=int,
+                        help="""Start year for e.g. gantt """)
 
     args = parser.parse_args()
     user = args.uname
@@ -248,7 +252,10 @@ if __name__ == '__main__':
         fname="USDFplan.tex"
         if args.fname:
             fname=args.fname
-        gantt(fname, list_jira_issues(jira, args.query, "project = PREOPS "))
+        start=2021
+        if args.year:
+            start=args.year
+        gantt(fname, list_jira_issues(jira, args.query, "project = PREOPS "), start=start)
         exit(0)
 
     if args.jor:

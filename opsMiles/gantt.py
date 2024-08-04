@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 from io import StringIO
 import sys
 
@@ -33,10 +33,6 @@ GANTT_PREAMBLE_STANDALONE = """
     y unit chart=0.55cm,
     y unit title=0.8cm
 ]{1}{40}
-  \\gantttitle{2021}{12} 
-   \\gantttitle{2022}{12}
-  \\gantttitle{2023}{12} 
-  \\ganttnewline\n
 """
 
 GANTT_POSTAMBLE_STANDALONE = """
@@ -55,7 +51,7 @@ def format_gantt(milestones, preamble, postamble, start=datetime(2021, 1, 1)):
         return code.lower().replace("-", "").replace("&", "")
 
     output = StringIO()
-    height = 0.6 * len(milestones)  + 0.7
+    height = 0.65 * len(milestones)  + 0.8
     opreamble = preamble.replace("PHEIGHT",str(height))
     output.write(opreamble)
 
@@ -94,15 +90,25 @@ def format_gantt(milestones, preamble, postamble, start=datetime(2021, 1, 1)):
     return output.getvalue()
 
 
-def gantt_standalone(milestones):
+def gantt_standalone(milestones, start):
+    years = [start, start+1, start+2]
+
+    DATES = f"""
+      \\gantttitle{{{years[0]}}}{{12}}
+       \\gantttitle{{{years[1]}}}{{12}}
+      \\gantttitle{{{years[2]}}}{{12}}
+      \\ganttnewline\n
+    """
+    
     return format_gantt(
         milestones,
-        GANTT_PREAMBLE_STANDALONE,
+        GANTT_PREAMBLE_STANDALONE + DATES,
         GANTT_POSTAMBLE_STANDALONE,
+        datetime(start,1,1)
     )
 
 
 
-def gantt(fname, milestones):
-    tex_source = gantt_standalone(milestones)
+def gantt(fname, milestones, start):
+    tex_source = gantt_standalone(milestones, start)
     write_output(fname , tex_source)
