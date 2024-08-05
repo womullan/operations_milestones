@@ -48,7 +48,7 @@ list: venv
 table: venv
 	( \
 		source $(VENVDIR)/bin/activate; \
-		python opsMiles.py -l -u ${USER} \
+		python opsMiles.py -ls -u ${USER} \
 	)
 
 report: venv

@@ -2,6 +2,8 @@
 import argparse
 import io
 import sys
+from datetime import datetime
+
 from opsMiles.ojira import set_jira_due_date, get_jira, list_jira_issues
 from opsMiles.ojira import list_milestones, get_last_comment, get_login_config
 from opsMiles.orst import jordoc
@@ -211,32 +213,37 @@ if __name__ == '__main__':
     formatter = argparse.RawDescriptionHelpFormatter
     parser = argparse.ArgumentParser(description=description,
                                      formatter_class=formatter)
-    parser.add_argument('-u', '--uname', help="""Username for Jira .""")
-    parser.add_argument('-p', '--passwd', help="""Jira Password for user.""")
     parser.add_argument('-a', '--ask', action='store_true',
                         help="""Ask for Jira Password for user.""")
-    parser.add_argument('-r', '--report', action='store_true',
-                        help="""Just report dont update anything.""")
-    parser.add_argument('-l', '--list', action='store_true',
-                        help="""List milestones""")
-    parser.add_argument('-s', '--split', action='store_true',
-                        help=""" Split milestones in two lists done and not done""")
-    parser.add_argument('-q', '--query', default=pred,
-                        help=""" Partial predicate for milestones like 
-                        'component = Data Management' """)
     parser.add_argument('-c', '--caption', default=None,
                         help=""" Caption for the TeX tabel only with -t """)
-    parser.add_argument("-m", "--mode", default="tex", choices=OUTPUT_MODES,
-                        help="""Output mode for table.
-                                verbose' displays all the information...""")
+    parser.add_argument("-d", "--dump",action='store_true',
+                        help="""Just dump csv """)
+    parser.add_argument('-f', '--fname', help="""Filename for output.""")
     parser.add_argument("-g", "--gantt",action='store_true',
                         help="""For specfied tickets plot a chart """)
     parser.add_argument("-j", "--jor",action='store_true',
                         help="""Joint Operations Review actions report""")
+    parser.add_argument('-l', '--list', action='store_true',
+                        help="""List milestones""")
+    parser.add_argument("-m", "--mode", default="tex", choices=OUTPUT_MODES,
+                        help="""Output mode for table.
+                                verbose' displays all the information...""")
+    parser.add_argument('-p', '--passwd', help="""Jira Password for user.""")
+    parser.add_argument('-q', '--query', default=pred,
+                        help=""" Partial predicate for milestones like 
+                        'component = Data Management' """)
+    parser.add_argument('-r', '--report', action='store_true',
+                        help="""Just report dont update anything.""")
+    parser.add_argument('-s', '--split', action='store_true',
+                        help=""" Split milestones in two lists done and not done""")
+    parser.add_argument('-t', '--tickets', action='store_true',
+                        help="""List any ticket/issue incomplete""")
+    parser.add_argument('-u', '--uname', help="""Username for Jira .""")
     parser.add_argument("-x", "--pop",action='store_true',
                         help="""Joint Operations POP report""")
-    parser.add_argument("-d", "--dump",action='store_true',
-                        help="""Just dump csv """)
+    parser.add_argument("-y", "--year", default=2024, type=int,
+                        help="""Start year for e.g. gantt """)
 
     args = parser.parse_args()
     user = args.uname
@@ -244,7 +251,13 @@ if __name__ == '__main__':
     user, pw, jira = get_jira(user, args.ask, args.passwd)
 
     if args.gantt:
-        gantt("USDFplan.tex", list_jira_issues(jira, args.query, "project = PREOPS "))
+        fname="USDFplan.tex"
+        if args.fname:
+            fname=args.fname
+        start=2021
+        if args.year:
+            start=args.year
+        gantt(fname, list_jira_issues(jira, args.query, ""), start=start)
         exit(0)
 
     if args.jor:
@@ -257,6 +270,11 @@ if __name__ == '__main__':
 
     if args.dump:
         dump("jira.csv", args)
+        exit(0)
+
+    if args.tickets:
+        output(list_jira_issues(jira, args.query, ""), args.mode,
+               caption=args.caption, split=args.split)
         exit(0)
 
     if args.list:
