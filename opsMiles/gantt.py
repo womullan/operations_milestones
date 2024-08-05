@@ -51,7 +51,7 @@ def format_gantt(milestones, preamble, postamble, start=datetime(2021, 1, 1)):
         return code.lower().replace("-", "").replace("&", "")
 
     output = StringIO()
-    height = 0.65 * len(milestones)  + 0.8
+    height = 0.7 * len(milestones)  + 0.8
     opreamble = preamble.replace("PHEIGHT",str(height))
     output.write(opreamble)
 
