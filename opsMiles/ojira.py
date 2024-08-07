@@ -9,10 +9,10 @@ EP = "https://rubinobs.atlassian.net"
 API_ENDPOINT = f"{EP}/rest/api/latest/"
 
 MFIELDS = ["key", "RO Milestone ID", "type", "summary", "duedate", "startdate",
-          "Team", "component", "Milestone Level", "status"]
+          "RubinTeam", "component", "Milestone Level", "status"]
 
 FIELDS = ["key", "type", "summary", "duedate", "Start date",
-           "Team", "component", "status"]
+           "RubinTeam", "component", "status"]
 
 def list(jira=None, fields=FIELDS, pred2=""):
     """

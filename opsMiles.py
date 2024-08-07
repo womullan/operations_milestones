@@ -96,7 +96,7 @@ def output(miles, mode, fname="milestones", caption=None, split=False):
         output(doneMiles,mode, "doneMilestones", caption=caption, split=False)
         return
 
-    cols = ["Milestone", "Jira ID", "Rubin ID", "Due Date", "Level", "Status", "Team"]
+    cols = ["Milestone", "Jira ID", "Rubin ID", "Due Date", "Level", "Status", "RubinTeam"]
     tout = sys.stdout
     sep = "\t"
     if mode == "tex":
@@ -118,7 +118,7 @@ def output(miles, mode, fname="milestones", caption=None, split=False):
             milestone_id = "not set"
         due = m.fields.duedate
         lev = m.fields.customfield_10037
-        team = m.raw['fields']['Team']
+        team = m.fields.customfield_10056
         status = m.fields.status
         outputrow(tout, sep, sumry, key, milestone_id, due, lev, team, status, mode)
 
