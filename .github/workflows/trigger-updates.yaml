@@ -10,7 +10,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        repo: [lsst/rtn-064]
+        repo: [lsst/rtn-064, lsst/rtn-085]
     steps:
       - uses: actions/checkout@v3
         with:
@@ -61,6 +61,7 @@ jobs:
 
       # auto merge for dmtn-232 is a too public so will manually check and merge it
       - name: Enable Pull Request Automerge
+        if: env.CHANGED == 'true'
         if: steps.cpr.outputs.pull-request-operation == 'created'
         uses: peter-evans/enable-pull-request-automerge@v1
         # requires branch protection
