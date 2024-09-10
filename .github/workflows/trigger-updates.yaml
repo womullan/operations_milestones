@@ -61,8 +61,7 @@ jobs:
 
       # auto merge for dmtn-232 is a too public so will manually check and merge it
       - name: Enable Pull Request Automerge
-        if: env.CHANGED == 'true'
-        if: steps.cpr.outputs.pull-request-operation == 'created'
+        if: env.CHANGED == 'true'&& steps.cpr.outputs.pull-request-operation == 'created'
         uses: peter-evans/enable-pull-request-automerge@v1
         # requires branch protection
         with:
