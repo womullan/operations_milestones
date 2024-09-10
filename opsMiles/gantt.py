@@ -42,6 +42,8 @@ GANTT_POSTAMBLE_STANDALONE = """
 """
 
 
+
+
 def format_gantt(milestones, preamble, postamble, start=datetime(2021, 1, 1)):
     def get_month_number(start, date):
         # First month is month 1; all other months sequentially.
@@ -49,6 +51,9 @@ def format_gantt(milestones, preamble, postamble, start=datetime(2021, 1, 1)):
 
     def get_milestone_name(code):
         return code.lower().replace("-", "").replace("&", "")
+
+    def fix_summary(sum):
+        return sum.replace(",", "-")
 
     output = StringIO()
     height = 0.7 * len(milestones)  + 0.8
@@ -65,21 +70,21 @@ def format_gantt(milestones, preamble, postamble, start=datetime(2021, 1, 1)):
         if ms.fields.issuetype.name == "Milestone":
             output_string = (
                 f"\\ganttmilestone[name={get_milestone_name(ms.key)},"
-                f"progress label text={ms.fields.summary}"
+                f"progress label text={fix_summary(ms.fields.summary)}"
                 f"\\phantom{{#1}},progress=100]{{{ms.key}}}"
                 f"{{{get_month_number(start, ddate)}}} \\ganttnewline"
             )
         else:
             startdate = ms.raw['fields']['Start date']
             if startdate == None :
-                print(f" {ms.key} has no Start Date ")
-                startdate = "2021-07-01"
+                print(f"{ms.fields.issuetype}-{ms.key} has no Start Date ")
+                startdate = "2024-09-01"
             sdate = datetime.fromisoformat(startdate)
             if not ddate:
                 ddate=sdate
             output_string = (
                 f"\\ganttbar[name={get_milestone_name(ms.key)},"
-                f"progress label text={ms.fields.summary}"
+                f"progress label text={fix_summary(ms.fields.summary)}"
                 f"\\phantom{{#1}},progress=100]{{{ms.key}}}"
                 f"{{{get_month_number(start, sdate)}}} "
                 f"{{{get_month_number(start, ddate)}}} \\ganttnewline"
