@@ -6,6 +6,7 @@ from rstcloth import RstCloth
 def popdoc(cols: list[str], rows: list[list[str]]) -> str :
     """
     Create rst table from cols and rows
+    seems to be a problem with multipline cosl so i am limiting the output
     :param cols: list of column names
     :param rows: list of rows
     """
