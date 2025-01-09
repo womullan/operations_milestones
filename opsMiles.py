@@ -155,10 +155,9 @@ def pop(outfile):
         status = i.fields.status
         isd = get_last_comment(jira, i.key).strip()
         tmp: io.StringIO = io.StringIO()
-        # fornow simplyfying this RST table - take out {isd}
-        print(f'{key},"{summary}",{assignee},{due},"{components}","{status}"', file=tmp)
+        print(f'{key},"{summary}",{assignee},{due},"{components}","{status}", "{isd}"', file=tmp)
         keylink = f"`{key} <https://ls.st/{key}>`_ "
-        # isd out of this also
+        # isd out of this fow now
         row = [keylink, summary, assignee, due, components, status]
         rows.append(row)
         print(tmp.getvalue().replace("\r", ""), file=tout)
