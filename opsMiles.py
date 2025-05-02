@@ -138,8 +138,9 @@ def pop(outfile):
     tout = open(outfile, 'w')
     # names for the csv
     cols = ["Issue key","Summary","Assignee","Due Date","Component","Status", "Implementation Status Description"]
-    # names in jira
-    fields = ["key", "summary", "assignee", "due", "components", "status"]
+    # names in jira - baseline start date is customfield_10063
+    # baseline end date is "customfield_10064
+    fields = ["key", "summary", "assignee", "customfield_10064", "components", "status"]
     issues = list_jira_issues(jira, args.query, "project = PREOPS ", order="", fields=fields)
     print (f"Create {outfile} with {len(issues)} issues")
     header = ",".join(cols)
@@ -149,7 +150,7 @@ def pop(outfile):
     for i in issues:
         key = i.key
         summary = i.fields.summary.strip()
-        due = i.fields.duedate
+        due = i.fields.customfield_10064
         assignee = i.fields.assignee
         components = getComponentsStr(i.fields.components)
         status = i.fields.status
