@@ -137,7 +137,7 @@ def pop(outfile):
     """ Create a POP report from the issues"""
     tout = open(outfile, 'w')
     # names for the csv
-    cols = ["Issue key","Summary","Assignee","Due Date","Component","Status", "Implementation Status Description"]
+    cols = ["Issue key","Summary","Assignee","BL End Date","Component","Status", "Implementation Status Description"]
     # names in jira - baseline start date is customfield_10063
     # baseline end date is "customfield_10064
     fields = ["key", "summary", "assignee", "customfield_10064", "components", "status"]
