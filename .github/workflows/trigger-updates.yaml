@@ -48,7 +48,7 @@ jobs:
       - name: Create Pull Request
         id: cpr
         if: env.CHANGED == 'true'
-        uses: peter-evans/create-pull-request@v5
+        uses: peter-evans/create-pull-request@v7
         with:
           token: ${{ secrets.WOM_MILESTONES_PAT }}
           #IF i leave someone needs to make a new PAT
@@ -62,7 +62,7 @@ jobs:
       # auto merge for dmtn-232 is a too public so will manually check and merge it
       - name: Enable Pull Request Automerge
         if: env.CHANGED == 'true'&& steps.cpr.outputs.pull-request-operation == 'created'
-        uses: peter-evans/enable-pull-request-automerge@v1
+        uses: peter-evans/enable-pull-request-automerge@v3
         # requires branch protection
         with:
           token: ${{ secrets.WOM_MILESTONES_PAT }}
