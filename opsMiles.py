@@ -172,9 +172,9 @@ def jor(outfile):
     cols = ["Issue key","Rec#","Summary","Report date","Due Date","Implementation Status",
             "Description","Response","Implementation Status Description"]
     # names in jira
-    fields = ["key", "RR Item ID", "summary", "labels", "due", "Implementation Status",
+    fields = ["key", "RR Item ID", "summary", "labels", "due", "status",
             "description", "Review Response"]
-    issues = list_jira_issues(jira, args.query, "project = PREOPS ", order="", fields=fields)
+    issues = list_jira_issues(jira, query=args.query, order="", fields=fields)
     print (f"Create {outfile} with {len(issues)} issues")
     header = ",".join(cols)
     print(header, file=tout)
@@ -186,7 +186,7 @@ def jor(outfile):
         summary = i.fields.summary.strip()
         repdate = i.fields.labels[0]
         due = i.fields.duedate
-        status = i.fields.customfield_10195
+        status = i.fields.status
         description = i.fields.description.strip()
         reposnse = i.fields.customfield_10147
         isd = get_last_comment(jira, i.key).strip()

@@ -12,13 +12,13 @@ jira.csv: venv .FORCE
 jor.csv: venv .FORCE
 	( \
 		source $(VENVDIR)/bin/activate; \
-		python opsMiles.py -j -q "and filter=11340"  -u ${USER} \
+		python opsMiles.py -j -q "filter=11340"  -u ${USER} \
 	)
 
 pop.csv: venv .FORCE
 	( \
 		source $(VENVDIR)/bin/activate; \
-		python opsMiles.py --pop -q "and filter=11380"  -u ${USER} \
+		python opsMiles.py --pop -q " and filter=11380"  -u ${USER} \
 	)
 
 FY23.tex: venv .FORCE

@@ -6,7 +6,7 @@ from opsMiles.uname import get_from_keyring
 
 #API_ENDPOINT = "https://jira.lsstcorp.org/rest/api/latest/"
 EP = "https://rubinobs.atlassian.net"
-API_ENDPOINT = f"{EP}/rest/api/latest/"
+API_ENDPOINT = f"{EP}/rest/api/3/"
 
 MFIELDS = ["key", "RO Milestone ID", "type", "summary", "duedate", "startdate",
           "RubinTeam", "component", "Milestone Level", "status"]
@@ -82,12 +82,13 @@ def list_jira_issues(jira, pred2=None, query=None, order="order by duedate asc",
                     add more predicate or sort order start with AND or OR
     """
     if query is None:
-        query = """project = PREOPS AND resolution = Unresolved AND
+        query = """resolution = Unresolved AND
                    (type = epic or type= story) AND labels is not EMPTY """
 
     if (pred2 is not None):
         query = query + " " + pred2
     query = query + " " + order
+    print(f"Query:{query}")
     r = jira.search_issues(jql_str=query, fields=fields, maxResults=False)
     return r
 
