@@ -169,10 +169,10 @@ def jor(outfile):
     """ Create a JOR report from the issues"""
     tout = open(outfile, 'w')
     # names for the csv
-    cols = ["Issue key","Rec#","Summary","Report date","Due Date","Assignee","Implementation Status",
+    cols = ["Issue key","Rec#","Summary","Report date","Due Date","Implementation Status","Assignee",
             "Description","Response","Implementation Status Description"]
     # names in jira
-    fields = ["key", "RR Item ID", "summary", "labels", "due", "assignee", "status",
+    fields = ["key", "RR Item ID", "summary", "labels", "due", "status", "assignee",
             "description", "Review Response"]
     issues = list_jira_issues(jira, query=args.query, order="", fields=fields)
     print (f"Create {outfile} with {len(issues)} issues")
@@ -192,10 +192,10 @@ def jor(outfile):
         reposnse = i.fields.customfield_10147
         isd = get_last_comment(jira, i.key).strip()
         tmp: io.StringIO = io.StringIO()
-        print(f'{key},{recnum},"{summary}",{repdate},{due},{asignee},"{status}","{description}",'
+        print(f'{key},{recnum},"{summary}",{repdate},{due},"{status}",{asignee},"{description}",'
               f'"{reposnse}","{isd}"', file=tmp)
         keylink = f"`{key} <https://ls.st/{key}>`_"
-        row = [keylink, recnum, summary, repdate, due, asignee, status, description, reposnse, isd]
+        row = [keylink, recnum, summary, repdate, due, status, asignee, description, reposnse, isd]
         rows.append(row)
         print(tmp.getvalue().replace("\r", ""), file=tout)
     tout.close()
