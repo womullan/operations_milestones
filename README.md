@@ -3,7 +3,9 @@
 This script opsMiles.py looks up google milestones and sets due dates on jira tickets with the same label.
 The -r (report) option will just report on the tickets needing update or not. 
 
-Ask @womullan for client_secret.json which you will need to access google. 
+Ask @womullan for client_secret.json which you will need to access google.
+
+Jira means Rubin cloud Jira at [https://rubinobs.atlassian.net/](https://rubinobs.atlassian.net/)
 
 Use the virtual environment to run this stuff activate it thus :
 
@@ -57,5 +59,5 @@ If you do not pass a username you will be prompted for it - this is also the way
 keychain if the password becomes invalid. 
 
 Sometimes Jira still requires you to validate in the browser. If you get login errors go to 
-https://jira.lsstcorp.org/secure/MyJiraHome.jspa
+[https://jira.lsstcorp.org/secure/MyJiraHome.jspa](https://rubinobs.atlassian.net/jira/secure/MyJiraHome.jspa)
 and make sure you can login.
