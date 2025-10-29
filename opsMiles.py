@@ -141,7 +141,7 @@ def pop(outfile):
     # names in jira - baseline start date is customfield_10063
     # baseline end date is "customfield_10064
     fields = ["key", "summary", "assignee", "customfield_10064", "components", "status"]
-    issues = list_jira_issues(jira, args.query, "project = PREOPS ", order="", fields=fields)
+    issues = list_jira_issues(jira=jira, query=args.query, order="", fields=fields)
     print (f"Create {outfile} with {len(issues)} issues")
     header = ",".join(cols)
     print(header, file=tout)
