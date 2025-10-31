@@ -53,6 +53,7 @@ def format_gantt(milestones, preamble, postamble, start=datetime(2021, 1, 1)):
         return code.lower().replace("-", "").replace("&", "")
 
     def fix_summary(sum):
+        sum = sum.replace("_","\_")
         return sum.replace(",", "-")
 
     output = StringIO()
