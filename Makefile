@@ -33,7 +33,7 @@ FY23.pdf:  FY23.tex
 USDFplan.tex: venv .FORCE
 	( \
 		source $(VENVDIR)/bin/activate; \
-		python opsMiles.py -g -q "and labels=USDF AND type  != story"  -u ${USER} \
+		python opsMiles.py -g -q " labels=USDF AND type  != story"  -u ${USER} \
 	)
 
 gantt: USDFplan.tex

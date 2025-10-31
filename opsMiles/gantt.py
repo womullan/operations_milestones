@@ -62,7 +62,9 @@ def format_gantt(milestones, preamble, postamble, start=datetime(2021, 1, 1)):
 
     for ms in milestones:
         ddate = None
-        sdate = ms.fields.duedate
+
+        if hasattr(ms.fields, 'duedate'):
+            sdate = ms.fields.duedate
         if sdate:
             ddate = datetime.fromisoformat(sdate)
         else:
