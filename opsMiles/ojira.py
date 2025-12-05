@@ -16,26 +16,26 @@ FIELDS = ["key", "type", "summary", "duedate", "Start date",
 
 def list(jira=None, fields=FIELDS, pred2=""):
     """
-    Get the  issues from Jira for PRE-OPS.
+    Get the  issues from Jira .
     set pred2="" to restric like "and labels=USDF"
     """
 
-    query = "project = PREOPS " + pred2
+    query = "project = RDO " + pred2
     query = query  +  " order by duedate asc"
 
     r = jira.search_issues(jql_str=query, fields=fields,  maxResults=500)
     return r
 
 def list_milestones(jira=None, pred2='and (component in ("Data Management", '
-                                     '"System Performance")'):
+                                     '"System Performance", "RDO")'):
     """
-    Get the milestone issues from Jira for PRE-OPS.
+    Get the milestone issues from Jira.
     Defaults to Data Management and System Performance
     set pred2="" to get all
     """
 
     fields = MFIELDS
-    query = "project = PREOPS AND type = Milestone " + pred2
+    query = 'type in ("L1 Milestone", "L2 Milestone", "L3 Milestone") ' + pred2
     query = query  +  " order by duedate asc"
 
     r = jira.search_issues(jql_str=query, fields=fields,  maxResults=500)
@@ -144,7 +144,7 @@ def get_last_comment(jira, key):
 
 
 if __name__ == '__main__':
-    """ Will list PREOPS issues"""
+    """ Will list issues"""
     user = sys.argv[1]
     user, pw, jira = get_jira(user)
 
