@@ -70,7 +70,7 @@ def format_gantt(milestones, preamble, postamble, start=datetime(2021, 1, 1)):
             ddate = datetime.fromisoformat(sdate)
         else:
             print(f"{ms.key} has no Due Date set", sys.stderr)
-        if ms.fields.issuetype.name == "Milestone":
+        if  "Milestone"in ms.fields.issuetype.name:
             output_string = (
                 f"\\ganttmilestone[name={get_milestone_name(ms.key)},"
                 f"progress label text={fix_summary(ms.fields.summary)}"
