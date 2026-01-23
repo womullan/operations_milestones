@@ -12,15 +12,11 @@ This script reuses the existing credential helper `get_login_config` from
 """
 
 import argparse
-import csv
 import sys
-from collections import defaultdict
 from typing import Dict, List
 
 import requests
 from requests.auth import HTTPBasicAuth
-import re
-from itertools import combinations
 
 from opsMiles.ojira import get_login_config
 
@@ -48,7 +44,6 @@ def get_all_atlassian_users(config: Dict, page_size: int = 1000) -> List[Dict]:
             # Some instances may return an object; handle gracefully
             raise RuntimeError(f'unexpected users response: {page}')
         for u in page:
-            a = None
             if isinstance(u, dict) and u.get('active'):
                users.append(u)
 
