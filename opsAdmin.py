@@ -205,7 +205,7 @@ def copy_watcher(config: Dict, src:str, dst:str) -> int:
             count += 1
         else:
             problem.append(i.key)
-    print (f"Of {len(issues)} did {count} PROBLEMS with :{problem}")
+    print (f"Of {len(issues)} watched {count} PROBLEMS with :{problem}")
     return count
 
 def add_user_to_group(config: Dict, account_id: str, group_name: str) -> str:
@@ -305,7 +305,7 @@ def reassign(config:dict, src:str, dst:str, dry_run:bool) -> int:
         print("NO changes - dry run only ")
     else:
         if len(problem) > 0:
-            print (f'THERE WERE PROBLEMS ASSIGNING :{problem}')
+            print (f'Of {len(issues)} assigned {count}.  THERE WERE PROBLEMS ASSIGNING :{problem}')
     return count
 
 

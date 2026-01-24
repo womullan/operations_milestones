@@ -5,3 +5,4 @@ oauth2client
 xlrd
 keyring
 rstcloth
+atlassian-python-api
