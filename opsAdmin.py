@@ -12,13 +12,15 @@ This script reuses the existing credential helper `get_login_config` from
 """
 
 import argparse
+import json
 import sys
 from typing import Dict, List
 
 import requests
+from jira import JIRA, JIRAError
 from requests.auth import HTTPBasicAuth
 
-from opsMiles.ojira import get_login_config
+from opsMiles.ojira import get_login_config, list_jira_issues, get_jira_from_config
 
 
 def get_all_atlassian_users(config: Dict, page_size: int = 1000) -> List[Dict]:
@@ -156,7 +158,56 @@ def get_account_ids_by_display_prefix(config: Dict, prefix: str) -> List[Dict]:
     return out
 
 
-# New helper: add a user (account_id) to a group by name (minimal, no-frills)
+def get_issues_assigned(jira: JIRA, account_id: str) -> list:
+    """Return the issues assigned to account_id.
+    """
+    issues = list_jira_issues(jira, query=f'assignee={account_id}', pred2='')
+    return issues
+
+
+def get_issues_watched(jira: JIRA, account_id: str) -> list:
+    """Return the issues assigned to account_id.
+    """
+    issues = list_jira_issues(jira, query=f'watcher={account_id}', pred2='')
+    return issues
+
+
+def add_watcher(j:JIRA, config: Dict, account_id: str, issue: str) -> str:
+    base = config.get('url')
+    if not base:
+        raise ValueError('Missing url in config')
+    url = base.rstrip('/') + f'/rest/api/3/issue/{issue}/watchers'
+    headers = {
+        "Content-Type": "application/json"
+    }
+    data = json.dumps(account_id)  # this produces: '"5b10a2844c20165700ede21g"'
+    try:
+        r= j._session.post(url, headers=headers, data=data)
+        r.raise_for_status()  # Raises an HTTPError if status is 4xx/5xx
+    except JIRAError as err:
+        return(err.text)
+    if r and r.status_code == 204:
+        return 'added'
+    return f'error:{r.status_code} {r.text}'
+
+
+def copy_watcher(config: Dict, src:str, dst:str) -> int:
+    """For tickets watched by accountIDsrc add dst as a wtacher also"""
+    jira = get_jira_from_config(config)
+    issues = get_issues_watched(jira,src)
+    print (f"Got {len(issues)} watched by {src}")
+    problem = []
+    count = 0
+    for i in issues:
+        s = add_watcher(jira, config, dst, i.key)
+        print(f'{i.key} {s}')
+        if s.startswith('added'):
+            count += 1
+        else:
+            problem.append(i.key)
+    print (f"Of {len(issues)} did {count} PROBLEMS with :{problem}")
+    return count
+
 def add_user_to_group(config: Dict, account_id: str, group_name: str) -> str:
     base = config.get('url')
     if not base:
@@ -172,7 +223,6 @@ def add_user_to_group(config: Dict, account_id: str, group_name: str) -> str:
     if r.status_code == 409:
         return 'exists'
     return f'error:{r.status_code} {r.text}'
-
 
 def copy_groups(config: Dict, src_account: str, dst_account: str, dry_run: bool = False) -> None:
     """Copy all groups where src_account is a member to dst_account.
@@ -229,6 +279,36 @@ def copy_groups(config: Dict, src_account: str, dst_account: str, dry_run: bool 
     print(f'Finished: added={added} exists={exists} errors={errors}')
 
 
+def reassign(config:dict, src:str, dst:str, dry_run:bool) -> int:
+    """Reassign tickets from accoutn id src to accountid dst - return the count"""
+    jira = get_jira_from_config(config)
+    issues = get_issues_assigned(jira, src)
+    print (f"Got {len(issues)} for {src}")
+    count = 0
+    problem = []
+    if dry_run:
+        print("NO changes - dry run only ")
+    for i in issues:
+        v = False
+        if  not dry_run:
+            try:
+                v = jira.assign_issue(i.key, dst)
+                print(f"Assign {i.key} to {dst}: {v}")
+            except JIRAError as err:
+                print(f'{i.key} {err.text}')
+        if v:
+           count += 1
+        else:
+            problem.append(i.key)
+
+    if dry_run:
+        print("NO changes - dry run only ")
+    else:
+        if len(problem) > 0:
+            print (f'THERE WERE PROBLEMS ASSIGNING :{problem}')
+    return count
+
+
 def main(argv=None):
     if argv is None:
         argv = sys.argv[1:]
@@ -242,24 +322,23 @@ def main(argv=None):
     p.add_argument('--copyGroups', nargs=2, metavar=('SRC','DST'), help='Copy all groups from SRC accountId to DST accountId')
     p.add_argument('--dry-run', action='store_true', help='Show what would be done for --copyGroups without making changes')
     p.add_argument('--findAccount', help='Find account ids for users whose displayName starts with the given prefix')
+    p.add_argument('--countAssigned', nargs='+', help='Print the number of issues assigned to the given accountId(s)')
+    p.add_argument('--listWatched', nargs='+', help=' issues assigned to the given accountId(s)')
+    p.add_argument('--reassign', nargs=2, metavar=('SRC','DST'), help='Change assignee of all tickets assigned to SRC to DST accountId')
+    p.add_argument('--copyWatcher', nargs=2, metavar=('SRC','DST'), help=' Make  DST accountId watch all tickets  watched by SRC accountId')
 
     args = p.parse_args(argv)
-
-    acct = args.listGroups
-    # allow any standalone action (no --dups required): listGroups, findAccount, or copyGroups
-    if not (args.dups or acct or getattr(args, 'findAccount', None) or getattr(args, 'copyGroups', None)):
-        p.print_help()
-        return 2
-
     # reuse existing helper to build login config
     config = get_login_config(args)
 
+    ok = False
+    acct = args.listGroups
     # if an account id was requested, list groups and exit
     if acct:
         # acct may be a list of account ids; iterate and print groups for each
         for aid in acct:
             print_groups_for_account(config, aid)
-        return 0
+        ok = True
 
     # find account(s) by display-name prefix
     if getattr(args, 'findAccount', None):
@@ -267,25 +346,57 @@ def main(argv=None):
         matches = get_account_ids_by_display_prefix(config, prefix)
         if not matches:
             print(f'No accounts starting with "{prefix}" found')
-            return 0
         for m in matches:
             print(f"{m['accountId']} | {m['displayName']} | {m.get('email','')}")
-        return 0
+        ok = True
 
     # copy groups operation
     if getattr(args, 'copyGroups', None):
         src, dst = args.copyGroups
         copy_groups(config, src, dst, dry_run=bool(getattr(args, 'dry_run', False)))
-        return 0
+        ok = True
 
-    print('Fetching users from Atlassian...')
-    users = get_all_atlassian_users(config)
-    print(f'Got {len(users)} users')
+    # print counts of issues assigned to account(s)
+    if getattr(args, 'countAssigned', None):
+        jira = get_jira_from_config(config)
+        for aid in args.countAssigned:
+            n = get_issues_assigned(jira, aid)
+            print(f'{aid}: {len(n)}')
+        ok = True
 
-    dups = find_duplicate_displayname_users(users)
+    if getattr(args, 'listWatched', None):
+        jira = get_jira_from_config(config)
+        for aid in args.listWatched:
+            issues = get_issues_assigned(jira, aid)
+            print(f'{aid}: {len(issues)}')
+            for i in issues:
+               print(f'{aid}: {i.key}')
+        ok = True
 
-    # print duplicates via helper and exit
-    print_duplicates(dups)
+    if getattr(args, 'reassign', None):
+        src, dst = args.reassign
+        reassign(config, src, dst, (getattr(args, 'dry_run', False)))
+        ok = True
+
+    # copy watcher operation
+    if getattr(args, 'copyWatcher', None):
+        src, dst = args.copyWatcher
+        copy_watcher(config, src, dst)
+        ok = True
+
+    if getattr(args, 'dups', None):
+        print('Fetching users from Atlassian...')
+        users = get_all_atlassian_users(config)
+        print(f'Got {len(users)} users')
+        dups = find_duplicate_displayname_users(users)
+        # print duplicates via helper and exit
+        print_duplicates(dups)
+        ok = True
+
+    # if no action ran, show help (preserve old style)
+    if not ok:
+        p.print_help()
+        return 2
 
     return 0
 
