@@ -168,7 +168,7 @@ def get_issues_assigned(jira: JIRA, account_id: str) -> list:
 def get_issues_watched(jira: JIRA, account_id: str) -> list:
     """Return the issues assigned to account_id.
     """
-    issues = list_jira_issues(jira, query=f'watcher={account_id}', pred2='')
+    issues = list_jira_issues(jira, query=f'project != PREOPS and watcher={account_id}', pred2='')
     return issues
 
 
@@ -206,6 +206,7 @@ def copy_watcher(config: Dict, src:str, dst:str) -> int:
         else:
             problem.append(i.key)
     print (f"Of {len(issues)} watched {count} PROBLEMS with :{problem}")
+    print (f"PREOPS is ignored")
     return count
 
 def add_user_to_group(config: Dict, account_id: str, group_name: str) -> str:
