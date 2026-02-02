@@ -158,17 +158,17 @@ def get_account_ids_by_display_prefix(config: Dict, prefix: str) -> List[Dict]:
     return out
 
 
-def get_issues_assigned(jira: JIRA, account_id: str) -> list:
+def get_issues_assigned(jira: JIRA, account_id: str, pred:str) -> list:
     """Return the issues assigned to account_id.
     """
-    issues = list_jira_issues(jira, query=f'assignee={account_id}', pred2='')
+    issues = list_jira_issues(jira, query=f'project != PREOPS and assignee={account_id}', pred2=pred)
     return issues
 
 
-def get_issues_watched(jira: JIRA, account_id: str) -> list:
+def get_issues_watched(jira: JIRA, account_id: str, pred) -> list:
     """Return the issues assigned to account_id.
     """
-    issues = list_jira_issues(jira, query=f'project != PREOPS and watcher={account_id}', pred2='')
+    issues = list_jira_issues(jira, query=f'project != PREOPS and watcher={account_id}', pred2=pred)
     return issues
 
 
@@ -191,16 +191,17 @@ def add_watcher(j:JIRA, config: Dict, account_id: str, issue: str) -> str:
     return f'error:{r.status_code} {r.text}'
 
 
-def copy_watcher(config: Dict, src:str, dst:str) -> int:
+def copy_watcher(config: Dict, src:str, dst:str, pred:str) -> int:
     """For tickets watched by accountIDsrc add dst as a wtacher also"""
     jira = get_jira_from_config(config)
-    issues = get_issues_watched(jira,src)
-    print (f"Got {len(issues)} watched by {src}")
+    issues = get_issues_watched(jira, src, pred)
+    tot = len(issues)
+    print (f"Got {tot} watched by {src}")
     problem = []
     count = 0
     for i in issues:
         s = add_watcher(jira, config, dst, i.key)
-        print(f'{i.key} {s}')
+        print(f'{i.key} ({count}/{tot}) {s}')
         if s.startswith('added'):
             count += 1
         else:
@@ -280,11 +281,12 @@ def copy_groups(config: Dict, src_account: str, dst_account: str, dry_run: bool 
     print(f'Finished: added={added} exists={exists} errors={errors}')
 
 
-def reassign(config:dict, src:str, dst:str, dry_run:bool) -> int:
+def reassign(config:dict, src:str, dst:str, dry_run:bool, pred:str) -> int:
     """Reassign tickets from accoutn id src to accountid dst - return the count"""
     jira = get_jira_from_config(config)
-    issues = get_issues_assigned(jira, src)
-    print (f"Got {len(issues)} for {src}")
+    issues = get_issues_assigned(jira, src, pred)
+    tot = len(issues)
+    print (f"Got {tot} for {src}")
     count = 0
     problem = []
     if dry_run:
@@ -294,7 +296,7 @@ def reassign(config:dict, src:str, dst:str, dry_run:bool) -> int:
         if  not dry_run:
             try:
                 v = jira.assign_issue(i.key, dst)
-                print(f"Assign {i.key} to {dst}: {v}")
+                print(f"Assign ({count}/{tot}) {i.key} to {dst}: {v}")
             except JIRAError as err:
                 print(f'{i.key} {err.text}')
         if v:
@@ -324,9 +326,10 @@ def main(argv=None):
     p.add_argument('--dry-run', action='store_true', help='Show what would be done for --copyGroups without making changes')
     p.add_argument('--findAccount', help='Find account ids for users whose displayName starts with the given prefix')
     p.add_argument('--countAssigned', nargs='+', help='Print the number of issues assigned to the given accountId(s)')
-    p.add_argument('--listWatched', nargs='+', help=' issues assigned to the given accountId(s)')
+    p.add_argument('--listWatched', nargs='+', help=' issues watched by the given accountId(s)')
     p.add_argument('--reassign', nargs=2, metavar=('SRC','DST'), help='Change assignee of all tickets assigned to SRC to DST accountId')
     p.add_argument('--copyWatcher', nargs=2, metavar=('SRC','DST'), help=' Make  DST accountId watch all tickets  watched by SRC accountId')
+    p.add_argument('--predicate', help=' partial predicae to pass to jira  like "and project=SE"')
 
     args = p.parse_args(argv)
     # reuse existing helper to build login config
@@ -334,6 +337,7 @@ def main(argv=None):
 
     ok = False
     acct = args.listGroups
+    pred = args.predicate
     # if an account id was requested, list groups and exit
     if acct:
         # acct may be a list of account ids; iterate and print groups for each
@@ -361,14 +365,14 @@ def main(argv=None):
     if getattr(args, 'countAssigned', None):
         jira = get_jira_from_config(config)
         for aid in args.countAssigned:
-            n = get_issues_assigned(jira, aid)
+            n = get_issues_assigned(jira, aid, pred)
             print(f'{aid}: {len(n)}')
         ok = True
 
     if getattr(args, 'listWatched', None):
         jira = get_jira_from_config(config)
         for aid in args.listWatched:
-            issues = get_issues_assigned(jira, aid)
+            issues = get_issues_watched(jira, aid, pred)
             print(f'{aid}: {len(issues)}')
             for i in issues:
                print(f'{aid}: {i.key}')
@@ -376,13 +380,13 @@ def main(argv=None):
 
     if getattr(args, 'reassign', None):
         src, dst = args.reassign
-        reassign(config, src, dst, (getattr(args, 'dry_run', False)))
+        reassign(config, src, dst, (getattr(args, 'dry_run', False)), pred)
         ok = True
 
     # copy watcher operation
     if getattr(args, 'copyWatcher', None):
         src, dst = args.copyWatcher
-        copy_watcher(config, src, dst)
+        copy_watcher(config, src, dst, pred)
         ok = True
 
     if getattr(args, 'dups', None):

@@ -6,3 +6,4 @@ xlrd
 keyring
 rstcloth
 atlassian-python-api
+ldap3
