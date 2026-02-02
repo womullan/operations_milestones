@@ -172,8 +172,9 @@ def jor(outfile):
     # names for the csv
     cols = ["Issue key","Rec#","Summary","Report date","Due Date","Implementation Status","Assignee",
             "Description","Response","Implementation Status Description"]
+    # baseline end date is "customfield_10064
     # names in jira
-    fields = ["key", "RR Item ID", "summary", "labels", "due", "status", "assignee",
+    fields = ["key", "RR Item ID", "summary", "labels", "customfield_10064", "status", "assignee",
             "description", "Review Response"]
     issues = list_jira_issues(jira, query=args.query, order="", fields=fields)
     print (f"Create {outfile} with {len(issues)} issues")
@@ -186,7 +187,7 @@ def jor(outfile):
         recnum= i.fields.customfield_10148
         summary = i.fields.summary.strip()
         repdate = i.fields.labels[0]
-        due = i.fields.duedate
+        due = i.fields.customfield_10064
         asignee = i.fields.assignee
         status = i.fields.status
         description = i.fields.description.strip()
