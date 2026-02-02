@@ -1,5 +1,6 @@
 import sys
 
+from atlassian import Confluence
 from jira import JIRA
 
 from opsMiles.uname import get_from_keyring
@@ -95,7 +96,6 @@ def list_jira_issues(jira, pred2=None, query=None, order="order by duedate asc",
 
 def get_jira_from_config(config:dict):
     return get_jira(username=config['user'], prompt=False, password=config['password'])[2]
-
 
 def get_jira(username=None, prompt=False, password=None):
     """ Setup up the JIRA object endpoint - prompt
