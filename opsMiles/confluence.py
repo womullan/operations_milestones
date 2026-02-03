@@ -391,9 +391,9 @@ def allow_edit(confluence, url, page_id, title, new_accountid, dry_run ):
         #if not page_has_update_restrictions(session, url, page_id):
         if can_user_update_page(confluence.session, url, page_id, new_accountid):
             # Important safety: do NOT create new restrictions.
-            print(f"SKIP ({new_accountid}Can update ): {title} (id={page_id})")
+            print(f"SKIP (Can update {new_accountid}): {title} (id={page_id})")
         else:
-            print(f"FIX  (restricted update): {title} (id={page_id})")
+            print(f"FIX  (allow update {new_accountid}): {title} (id={page_id})")
             add_user_to_update_restriction(confluence, url, page_id, new_accountid, dry_run=dry_run)
             return True
 
@@ -429,11 +429,13 @@ def process_space(
         for page in pages:
             page_id = page["id"]
             title = page["title"]
-            creator_id = page["history"]["createdBy"]["accountId"]
+            creator_id=""
+            if "accountId" in page["history"]["createdBy"]:
+                creator_id = page["history"]["createdBy"]["accountId"]
+            else:
+                print(f"Can not get creator: {title} (id={page_id})")
 
-            #print(f"Checking: {title} (id={page_id})")
-
-            # Cannot Transfer ownership - cna make sure editable
+            # Cannot Transfer ownership - can make sure editable
             url = f'{config.get("url")}/wiki/'
             if creator_id == old_account_id:
                 try:

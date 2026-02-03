@@ -329,6 +329,7 @@ def main(argv=None):
     p.add_argument('--listWatched', nargs='+', help=' issues watched by the given accountId(s)')
     p.add_argument('--reassign', nargs=2, metavar=('SRC','DST'), help='Change assignee of all tickets assigned to SRC to DST accountId')
     p.add_argument('--copyWatcher', nargs=2, metavar=('SRC','DST'), help=' Make  DST accountId watch all tickets  watched by SRC accountId')
+    p.add_argument('--moveuser', nargs=2, metavar=('SRC','DST'), help=' Copy groups, reassign tickets and copy watcher from  DST accountId to SRC accountId')
     p.add_argument('--predicate', help=' partial predicae to pass to jira  like "and project=SE"')
 
     args = p.parse_args(argv)
@@ -376,6 +377,13 @@ def main(argv=None):
             print(f'{aid}: {len(issues)}')
             for i in issues:
                print(f'{aid}: {i.key}')
+        ok = True
+
+    if getattr(args, 'moveuser', None):
+        src, dst = args.moveuser
+        copy_groups(config, src, dst, dry_run=bool(getattr(args, 'dry_run', False)))
+        copy_watcher(config, src, dst, pred)
+        reassign(config, src, dst, (getattr(args, 'dry_run', False)), pred)
         ok = True
 
     if getattr(args, 'reassign', None):
