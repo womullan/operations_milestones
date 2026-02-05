@@ -21,6 +21,7 @@ from jira import JIRA, JIRAError
 from requests.auth import HTTPBasicAuth
 
 from opsMiles.ojira import get_login_config, list_jira_issues, get_jira_from_config
+from opsMiles.confluence import process_space, get_confluence_client
 
 
 def get_all_atlassian_users(config: Dict, page_size: int = 1000) -> List[Dict]:
@@ -65,6 +66,10 @@ def find_duplicate_displayname_users(users: List[Dict]):
     """
     # Build a mapping from displayName to list of users with that exact displayName
     dups = {}
+    skip = ["Peter", "Product Requirements Guide", "Work Organizer", "Brand Voice Crafter"
+            "Lucidchart Diagrams Connector for Jira", "Opsgenie Incident Timeline",
+            "migrate-jira-34f7173f-c7ca-4a05-82c6-d7f88d2266ec", "Jira Workflow Toolbox Cloud",
+            "Lucidchart Diagrams Connector"]
     for u in users:
         dn = u.get('displayName')
         if not dn or dn in dups:
@@ -74,9 +79,10 @@ def find_duplicate_displayname_users(users: List[Dict]):
             if trymatch != u :
                 odn = trymatch.get('displayName')
                 if dn.startswith(odn):  # got a dup
-                    if not dn in dups:
-                        dups[dn]=[u]
-                    dups[dn].append(trymatch)
+                    if odn != "Peter" and dn not in skip:
+                        if not dn in dups:
+                            dups[dn]=[u]
+                        dups[dn].append(trymatch)
 
     return dups
 
@@ -330,7 +336,8 @@ def main(argv=None):
     p.add_argument('--reassign', nargs=2, metavar=('SRC','DST'), help='Change assignee of all tickets assigned to SRC to DST accountId')
     p.add_argument('--copyWatcher', nargs=2, metavar=('SRC','DST'), help=' Make  DST accountId watch all tickets  watched by SRC accountId')
     p.add_argument('--moveuser', nargs=2, metavar=('SRC','DST'), help=' Copy groups, reassign tickets and copy watcher from  DST accountId to SRC accountId')
-    p.add_argument('--predicate', help=' partial predicae to pass to jira  like "and project=SE"')
+    p.add_argument('--predicate', help=' partial predicate to pass to jira  like "and project=SE"')
+    p.add_argument('--spaces', nargs='+', help=' for move user:one or more space names for confluence reasignment like DM EPO LSSTOps')
 
     args = p.parse_args(argv)
     # reuse existing helper to build login config
@@ -381,9 +388,17 @@ def main(argv=None):
 
     if getattr(args, 'moveuser', None):
         src, dst = args.moveuser
-        copy_groups(config, src, dst, dry_run=bool(getattr(args, 'dry_run', False)))
+        dry_run = getattr(args, 'dry_run', False)
+        copy_groups(config, src, dst, dry_run=dry_run)
         copy_watcher(config, src, dst, pred)
-        reassign(config, src, dst, (getattr(args, 'dry_run', False)), pred)
+        reassign(config, src, dst, dry_run, pred)
+        confluence = get_confluence_client(config)
+        if args.spaces:
+            for s in args.spaces:
+                process_space(config,confluence, s, src, dst, limit=500, dry_run=dry_run)
+        else:
+            print ("This will take a long time since it will scan all spaces")
+            process_space(config, confluence, "", src, dst, limit=500, dry_run=dry_run)
         ok = True
 
     if getattr(args, 'reassign', None):

@@ -229,7 +229,7 @@ def update_single_page(config: dict, page_url: str, search_string: str, replace_
     Returns list with the page id if updated (or would be updated on dry run), else empty list.
     """
     confluence = get_confluence_client(config)
-    page_id = _extract_page_id_from_url(page_url)
+    page_id = extract_page_id_from_url(page_url)
     if not page_id or page_id=='None':
         raise ValueError(f"Could not extract page id from URL: {page_url}")
 
@@ -287,31 +287,6 @@ def confluence_request(session, method, base_url, path, *, params=None, json=Non
     url = base_url.rstrip("/") + path
     r = session.request(method=method, url=url, params=params, json=json)
     return r
-
-
-def page_has_update_restrictions(session, base_url, page_id):
-    """
-    Returns True if the page already has any 'update' restrictions (user or group).
-    Uses: GET /rest/api/content/{id}/restriction/byOperation/update
-    """
-    r = confluence_request(
-        session,
-        "GET",
-        base_url,
-        f"/rest/api/content/{page_id}/restriction/byOperation/update",
-        params={"expand": "restrictions.user,restrictions.group"},
-    )
-
-    if r.status_code == 404:
-        # No restrictions object found (treat as unrestricted)
-        return False
-
-    r.raise_for_status()
-    data = r.json()
-    restrictions = data.get("restrictions", {})
-    users = restrictions.get("user", {}).get("results", []) or []
-    groups = restrictions.get("group", {}).get("results", []) or []
-    return (len(users) + len(groups)) > 0
 
 
 def can_user_update_page(session, base_url, page_id, account_id):
@@ -386,13 +361,27 @@ def _get_current_account_id(confluence) -> str:
     return resp.json()["accountId"]
 
 
-def allow_edit(confluence, url, page_id, title, new_accountid, dry_run ):
+def allow_edit(confluence, url, page_id, title, old_accountid,  new_accountid, dry_run ):
+    """
+    Check if old_account_id can edit the page - if so allow new account id to edit
+    unless it already can.
+    :param confluence:
+    :param url:
+    :param page_id:
+    :param title:
+    :param old_accountid:
+    :param new_accountid:
+    :param dry_run:
+    :return:
+    """
     try:
-        #if not page_has_update_restrictions(session, url, page_id):
+
         if can_user_update_page(confluence.session, url, page_id, new_accountid):
-            # Important safety: do NOT create new restrictions.
-            print(f"SKIP (Can update {new_accountid}): {title} (id={page_id})")
-        else:
+            #print(f"SKIP (Can update {new_accountid}): {title} (id={page_id})")
+            return False
+
+        if can_user_update_page(confluence.session, url, page_id, old_accountid):
+            # old account can edit so let the new one also
             print(f"FIX  (allow update {new_accountid}): {title} (id={page_id})")
             add_user_to_update_restriction(confluence, url, page_id, new_accountid, dry_run=dry_run)
             return True
@@ -415,6 +404,7 @@ def process_space(
     start = 0
     count = 0
     wcount = 0
+    pcount = 0
     while True:
         pages = confluence.get_all_pages_from_space(
             space=space_key,
@@ -425,33 +415,29 @@ def process_space(
 
         if not pages:
             break
-
+        url = f'{config.get("url")}/wiki/'
         for page in pages:
+            pcount += 1
             page_id = page["id"]
             title = page["title"]
-            creator_id=""
-            if "accountId" in page["history"]["createdBy"]:
-                creator_id = page["history"]["createdBy"]["accountId"]
-            else:
-                print(f"Can not get creator: {title} (id={page_id})")
+            if (pcount % 100) == 0:
+                print (f"Checked {pcount} pages")
 
             # Cannot Transfer ownership - can make sure editable
-            url = f'{config.get("url")}/wiki/'
-            if creator_id == old_account_id:
-                try:
-                    print(f"Check/allow edit: {title} (id={page_id})")
-                    ok = allow_edit(
-                        confluence=confluence,
-                        url=url,
-                        page_id=page_id,
-                        title=title,
-                        new_accountid=new_account_id,
-                        dry_run=dry_run,
-                    )
-                    if ok :
-                        count += 1
-                except Exception as e:
-                    print(f"  FAILED to add editor: {e}")
+            try:
+                ok = allow_edit(
+                    confluence=confluence,
+                    url=url,
+                    page_id=page_id,
+                    title=title,
+                    old_accountid=old_account_id,
+                    new_accountid=new_account_id,
+                    dry_run=dry_run,
+                )
+                if ok :
+                    count += 1
+            except Exception as e:
+                print(f"  FAILED to add editor: {e}")
 
             # Transfer watcher
             if page_has_watcher(confluence, page_id, old_account_id):

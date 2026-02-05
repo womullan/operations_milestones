@@ -72,7 +72,8 @@ if __name__ == '__main__':
 
         if pageid:
             allow_edit(confluence, f"{config.get('url')}/wiki/", pageid, "",
-                       new_accountid, args.dry_run)
+                       old_accountid, new_accountid, args.dry_run)
+
         else:
             process_space(
                 config=config,
