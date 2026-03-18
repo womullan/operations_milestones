@@ -15,6 +15,7 @@ import re
 import html
 import sys
 
+from urllib.parse import quote
 from atlassian import Confluence
 
 def get_confluence_client(config: dict) -> Confluence:
@@ -374,8 +375,10 @@ def allow_edit(confluence, url, page_id, title, old_accountid,  new_accountid, d
     :param dry_run:
     :return:
     """
+    if page_is_favourited(confluence,url,old_accountid,page_id):
+        print(f"Adding favoroite {page_id}")
+        add_page_favourite(confluence,url,new_accountid,page_id)
     try:
-
         if can_user_update_page(confluence.session, url, page_id, new_accountid):
             #print(f"SKIP (Can update {new_accountid}): {title} (id={page_id})")
             return False
@@ -474,3 +477,41 @@ def list_spaces(confluence, limit=50):
             yield space
 
         start += limit
+
+def page_is_favourited(confluence, base_url, account_id, page_id):
+    """
+    True iff account_id has favourited page_id.
+
+    base_url must include /wiki, e.g.
+      https://your-domain.atlassian.net/wiki
+    """
+    path = (
+        "/rest/api/relation/favourite/from/user/"
+        f"{quote(str(account_id), safe='')}"
+        f"/to/content/{quote(str(page_id), safe='')}"
+    )
+    resp = confluence_request(confluence.session, "GET", base_url, path)
+    if resp.status_code == 200:
+        return True
+    if resp.status_code == 404:
+        return False
+    resp.raise_for_status()
+
+
+def add_page_favourite(confluence, base_url, account_id, page_id, dry_run=False):
+    """
+    Add page_id to account_id's favourites.
+    """
+    if dry_run:
+        print(f"DRY-RUN: would favourite page {page_id} for {account_id}")
+        return None
+
+    path = (
+        "/rest/api/relation/favourite/from/user/"
+        f"{quote(str(account_id), safe='')}"
+        f"/to/content/{quote(str(page_id), safe='')}"
+    )
+    resp = confluence_request(confluence.session, "PUT", base_url, path)
+    resp.raise_for_status()
+    return resp.json()
+
