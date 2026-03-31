@@ -109,7 +109,12 @@ def get_jira(username=None, prompt=False, password=None):
     if password is None:
         user, pw = get_from_keyring(username=username, prompt=prompt)
     print(f"Jira user: {user} end point: {EP}")
-    return (user, pw, JIRA(server=EP, basic_auth=(user, pw)))
+    jira = JIRA(server=EP, basic_auth=(user, pw))
+    try:
+        jira.myself()
+    except Exception as e:
+        raise Exception(f"Authentication failed for user '{user}': {e}")
+    return (user, pw, jira)
 
 def get_login_config(args):
     username = args.uname
