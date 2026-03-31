@@ -10,9 +10,9 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        repo: [lsst/rtn-064, lsst/rtn-085]
+        repo: [lsst/rtn-068, lsst/rtn-064, lsst/rtn-085]
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v6
         with:
           token: ${{ secrets.WOM_MILESTONES_PAT }}
           repository: ${{ matrix.repo }}
