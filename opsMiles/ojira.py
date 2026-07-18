@@ -69,7 +69,7 @@ def set_jira_due_date(ms, due_date, jira=None, issue=None):
     issue_id: str = issue.key
     message = "Setting Milestone " + ms + " due date on " + issue_id + " to " + due_date
     print(message)
-    issue.update(duedate=due_date)
+    issue.update(duedate=due_date, notifyUsers=False)
     jira.add_comment(issue_id, message)
 
     # requests.put(API_ENDPOINT + "issue/" + issue_id, auth=(user, pw), json=data)

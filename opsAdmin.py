@@ -174,7 +174,7 @@ def get_issues_assigned(jira: JIRA, account_id: str, pred:str) -> list:
 def get_issues_watched(jira: JIRA, account_id: str, pred) -> list:
     """Return the issues assigned to account_id.
     """
-    issues = list_jira_issues(jira, query=f'project != PREOPS and watcher={account_id}', pred2=pred)
+    issues = list_jira_issues(jira, query=f'project != PREOPS and watcher={account_id} and status NOT IN (Closed, Done) ', pred2=pred)
     return issues
 
 
@@ -182,7 +182,7 @@ def add_watcher(j:JIRA, config: Dict, account_id: str, issue: str) -> str:
     base = config.get('url')
     if not base:
         raise ValueError('Missing url in config')
-    url = base.rstrip('/') + f'/rest/api/3/issue/{issue}/watchers'
+    url = base.rstrip('/') + f'/rest/api/3/issue/{issue}/watchers?notifyUsers=false'
     headers = {
         "Content-Type": "application/json"
     }
@@ -286,6 +286,12 @@ def copy_groups(config: Dict, src_account: str, dst_account: str, dry_run: bool 
             errors += 1
     print(f'Finished: added={added} exists={exists} errors={errors}')
 
+def assign_issue_quiet(jira: JIRA, issue_key: str, account_id: str) -> bool:
+    """Assign issue without sending notification."""
+    url = f'{jira.server_url}/rest/api/3/issue/{issue_key}/assignee?notifyUsers=false'
+    payload = {'accountId': account_id}
+    r = jira._session.put(url, json=payload)
+    return r.status_code == 204
 
 def reassign(config:dict, src:str, dst:str, dry_run:bool, pred:str) -> int:
     """Reassign tickets from accoutn id src to accountid dst - return the count"""
@@ -301,7 +307,8 @@ def reassign(config:dict, src:str, dst:str, dry_run:bool, pred:str) -> int:
         v = False
         if  not dry_run:
             try:
-                v = jira.assign_issue(i.key, dst)
+                #v = jira.assign_issue(i.key, dst)
+                v = assign_issue_quiet(jira, i.key, dst)
                 print(f"Assign ({count}/{tot}) {i.key} to {dst}: {v}")
             except JIRAError as err:
                 print(f'{i.key} {err.text}')
