@@ -174,7 +174,15 @@ def get_issues_assigned(jira: JIRA, account_id: str, pred:str) -> list:
 def get_issues_watched(jira: JIRA, account_id: str, pred) -> list:
     """Return the issues assigned to account_id.
     """
-    issues = list_jira_issues(jira, query=f'project != PREOPS and watcher={account_id} and status NOT IN (Closed, Done) ', pred2=pred)
+    issues = list_jira_issues(jira, query=f'project != PREOPS and watcher={account_id} and '
+                                          f'status NOT IN (Closed, Done, Resolved, Cancelled, "Journal Submitted") ', pred2=pred)
+    return issues
+
+
+def get_issues_reported(jira: JIRA, account_id: str, pred) -> list:
+    """Return the issues reported by account_id."""
+    issues = list_jira_issues(jira, query=f'project != PREOPS and reporter={account_id} and '
+                                          f'status NOT IN (Closed, Done, Resolved, Cancelled, "Journal Submitted") ', pred2=pred)
     return issues
 
 
@@ -215,6 +223,84 @@ def copy_watcher(config: Dict, src:str, dst:str, pred:str) -> int:
     print (f"Of {len(issues)} watched {count} PROBLEMS with :{problem}")
     print (f"PREOPS is ignored")
     return count
+
+
+def change_reporter_quiet(jira: JIRA, issue_key: str, account_id: str) -> tuple:
+    """Change reporter on issue without sending notification.
+    
+    Returns (success: bool, error_msg: str or None)
+    """
+    # Try using jira library's update method first (may send notification)
+    try:
+        issue = jira.issue(issue_key)
+        issue.update(fields={'reporter': {'accountId': account_id}}, notify=False)
+        return True, None
+    except JIRAError as e:
+        pass  # Fall through to try direct API
+    except Exception as e:
+        pass
+    
+    # Try direct REST API with notifyUsers=false
+    url = f'{jira.server_url}/rest/api/3/issue/{issue_key}?notifyUsers=false'
+    payload = {
+        'fields': {
+            'reporter': {'accountId': account_id}
+        }
+    }
+    try:
+        r = jira._session.put(url, json=payload)
+        if r.status_code in (200, 204):
+            return True, None
+        try:
+            err = r.json().get('errorMessages', [r.text])
+            errors = r.json().get('errors', {})
+            if errors:
+                err_msg = str(errors)
+            elif err:
+                err_msg = '; '.join(err) if isinstance(err, list) else str(err)
+            else:
+                err_msg = f'{r.status_code}: {r.text}'
+        except Exception:
+            err_msg = f'{r.status_code}: {r.text}'
+        return False, err_msg
+    except JIRAError as e:
+        return False, e.text
+    except Exception as e:
+        return False, str(e)
+
+
+def copy_reporter(config: Dict, src: str, dst: str, dry_run: bool, pred: str) -> int:
+    """Change reporter from src to dst on all issues reported by src."""
+    jira = get_jira_from_config(config)
+    # Verify destination user exists
+    try:
+        dst_user = jira.user(dst)
+        print(f"Destination user: {dst_user.displayName} ({dst})")
+    except Exception as e:
+        print(f"WARNING: Could not verify destination user {dst}: {e}")
+    issues = get_issues_reported(jira, src, pred)
+    tot = len(issues)
+    print(f"Got {tot} reported by {src}")
+    count = 0
+    problem = []
+    if dry_run:
+        print("NO changes - dry run only")
+    for i in issues:
+        if dry_run:
+            print(f"  Would change reporter on {i.key}")
+        else:
+            success, err = change_reporter_quiet(jira, i.key, dst)
+            if success:
+                print(f"Changed reporter ({count}/{tot}) {i.key}")
+                count += 1
+            else:
+                print(f"FAILED to change reporter on {i.key}: {err}")
+                problem.append(i.key)
+    if not dry_run and problem:
+        print(f"Of {tot} issues, changed {count}. PROBLEMS with: {problem}")
+    print("PREOPS is ignored")
+    return count
+
 
 def add_user_to_group(config: Dict, account_id: str, group_name: str) -> str:
     base = config.get('url')
@@ -287,11 +373,79 @@ def copy_groups(config: Dict, src_account: str, dst_account: str, dry_run: bool 
     print(f'Finished: added={added} exists={exists} errors={errors}')
 
 def assign_issue_quiet(jira: JIRA, issue_key: str, account_id: str) -> bool:
-    """Assign issue without sending notification."""
-    url = f'{jira.server_url}/rest/api/3/issue/{issue_key}/assignee?notifyUsers=false'
-    payload = {'accountId': account_id}
+    """Assign issue without sending notification.
+    
+    Uses the general issue update endpoint with notifyUsers=false which is
+    more reliable for suppressing notifications than the assignee endpoint.
+    """
+    url = f'{jira.server_url}/rest/api/3/issue/{issue_key}?notifyUsers=false'
+    payload = {
+        'fields': {
+            'assignee': {'accountId': account_id}
+        }
+    }
     r = jira._session.put(url, json=payload)
     return r.status_code == 204
+
+
+def get_user_filters(jira: JIRA, account_id: str) -> list:
+    """Get all filters owned by an account."""
+    url = f'{jira.server_url}/rest/api/3/filter/search'
+    params = {'accountId': account_id, 'maxResults': 100}
+    r = jira._session.get(url, params=params)
+    if r.status_code == 200:
+        return r.json().get('values', [])
+    return []
+
+
+def share_filter(jira: JIRA, filter_id: int, account_id: str) -> tuple:
+    """Grant view permission on a filter to a user.
+    
+    Returns (success: bool, error_msg: str or None)
+    """
+    url = f'{jira.server_url}/rest/api/3/filter/{filter_id}/permission'
+    payload = {
+        'type': 'user',
+        'accountId': account_id
+    }
+    try:
+        r = jira._session.post(url, json=payload)
+        if r.status_code in (200, 201):
+            return True, None
+        try:
+            err = r.json().get('errorMessages', [r.text])
+            err_msg = '; '.join(err) if isinstance(err, list) else str(err)
+        except Exception:
+            err_msg = r.text
+        return False, err_msg
+    except JIRAError as e:
+        return False, e.text
+    except Exception as e:
+        return False, str(e)
+
+
+def share_all_filters(jira: JIRA, src: str, dst: str, dry_run: bool = False) -> int:
+    """Share all filters owned by src user with dst user (grants edit permission)."""
+    filters = get_user_filters(jira, src)
+    shared = 0
+    failed = 0
+    print(f"Found {len(filters)} filters owned by {src}")
+    for f in filters:
+        fid = f['id']
+        fname = f['name']
+        if dry_run:
+            print(f"  Would share filter {fid}: {fname}")
+        else:
+            success, err = share_filter(jira, fid, dst)
+            if success:
+                print(f"  Shared filter {fid}: {fname}")
+                shared += 1
+            else:
+                print(f"  FAILED filter {fid}: {fname} - {err}")
+                failed += 1
+    print(f"Filters: shared={shared} failed={failed}")
+    return shared
+
 
 def reassign(config:dict, src:str, dst:str, dry_run:bool, pred:str) -> int:
     """Reassign tickets from accoutn id src to accountid dst - return the count"""
@@ -342,6 +496,8 @@ def main(argv=None):
     p.add_argument('--listWatched', nargs='+', help=' issues watched by the given accountId(s)')
     p.add_argument('--reassign', nargs=2, metavar=('SRC','DST'), help='Change assignee of all tickets assigned to SRC to DST accountId')
     p.add_argument('--copyWatcher', nargs=2, metavar=('SRC','DST'), help=' Make  DST accountId watch all tickets  watched by SRC accountId')
+    p.add_argument('--copyReporter', nargs=2, metavar=('SRC','DST'), help='Change reporter from SRC to DST on all issues reported by SRC')
+    p.add_argument('--transferFilters', nargs=2, metavar=('SRC','DST'), help='Transfer all Jira filters owned by SRC to DST accountId')
     p.add_argument('--moveuser', nargs=2, metavar=('SRC','DST'), help=' Copy groups, reassign tickets and copy watcher from  DST accountId to SRC accountId')
     p.add_argument('--predicate', help=' partial predicate to pass to jira  like "and project=SE"')
     p.add_argument('--spaces', nargs='+', help=' for move user:one or more space names for confluence reasignment like DM EPO LSSTOps')
@@ -396,8 +552,11 @@ def main(argv=None):
     if getattr(args, 'moveuser', None):
         src, dst = args.moveuser
         dry_run = getattr(args, 'dry_run', False)
+        jira = get_jira_from_config(config)
         copy_groups(config, src, dst, dry_run=dry_run)
+        share_all_filters(jira, src, dst, dry_run=dry_run)
         copy_watcher(config, src, dst, pred)
+        copy_reporter(config, src, dst, dry_run, pred)
         reassign(config, src, dst, dry_run, pred)
         confluence = get_confluence_client(config)
         if args.spaces:
@@ -417,6 +576,18 @@ def main(argv=None):
     if getattr(args, 'copyWatcher', None):
         src, dst = args.copyWatcher
         copy_watcher(config, src, dst, pred)
+        ok = True
+
+    # copy reporter operation
+    if getattr(args, 'copyReporter', None):
+        src, dst = args.copyReporter
+        copy_reporter(config, src, dst, getattr(args, 'dry_run', False), pred)
+        ok = True
+
+    if getattr(args, 'transferFilters', None):
+        src, dst = args.transferFilters
+        jira = get_jira_from_config(config)
+        share_all_filters(jira, src, dst, dry_run=getattr(args, 'dry_run', False))
         ok = True
 
     if getattr(args, 'dups', None):
