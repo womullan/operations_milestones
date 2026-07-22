@@ -21,7 +21,7 @@ from jira import JIRA, JIRAError
 from requests.auth import HTTPBasicAuth
 
 from opsMiles.ojira import get_login_config, list_jira_issues, get_jira_from_config
-from opsMiles.confluence import process_space, get_confluence_client
+from opsMiles.confluence import process_space, get_confluence_client, copy_personal_space
 
 
 def get_all_atlassian_users(config: Dict, page_size: int = 1000) -> List[Dict]:
@@ -175,14 +175,14 @@ def get_issues_watched(jira: JIRA, account_id: str, pred) -> list:
     """Return the issues assigned to account_id.
     """
     issues = list_jira_issues(jira, query=f'project != PREOPS and watcher={account_id} and '
-                                          f'status NOT IN (Closed, Done, Resolved, Cancelled, "Journal Submitted") ', pred2=pred)
+                                          f'status NOT IN (Closed, Done, Resolved, Cancelled, Deprecated, "Journal Submitted") ', pred2=pred)
     return issues
 
 
 def get_issues_reported(jira: JIRA, account_id: str, pred) -> list:
     """Return the issues reported by account_id."""
-    issues = list_jira_issues(jira, query=f'project != PREOPS and reporter={account_id} and '
-                                          f'status NOT IN (Closed, Done, Resolved, Cancelled, "Journal Submitted") ', pred2=pred)
+    issues = list_jira_issues(jira, query=f'project != PREOPS and reporter={account_id} '
+                                          , pred2=pred)
     return issues
 
 
@@ -498,6 +498,9 @@ def main(argv=None):
     p.add_argument('--copyWatcher', nargs=2, metavar=('SRC','DST'), help=' Make  DST accountId watch all tickets  watched by SRC accountId')
     p.add_argument('--copyReporter', nargs=2, metavar=('SRC','DST'), help='Change reporter from SRC to DST on all issues reported by SRC')
     p.add_argument('--transferFilters', nargs=2, metavar=('SRC','DST'), help='Transfer all Jira filters owned by SRC to DST accountId')
+    p.add_argument('--copyPersonalSpace', nargs=2, metavar=('SRC','DST'), help='Copy pages from SRC\'s Confluence personal space to DST\'s')
+    p.add_argument('--srcUsername', help='Username for SRC personal space lookup (e.g., ykang)')
+    p.add_argument('--dstUsername', help='Username for DST personal space lookup')
     p.add_argument('--moveuser', nargs=2, metavar=('SRC','DST'), help=' Copy groups, reassign tickets and copy watcher from  DST accountId to SRC accountId')
     p.add_argument('--predicate', help=' partial predicate to pass to jira  like "and project=SE"')
     p.add_argument('--spaces', nargs='+', help=' for move user:one or more space names for confluence reasignment like DM EPO LSSTOps')
@@ -559,6 +562,15 @@ def main(argv=None):
         copy_reporter(config, src, dst, dry_run, pred)
         reassign(config, src, dst, dry_run, pred)
         confluence = get_confluence_client(config)
+        # Copy personal space
+        success, msg = copy_personal_space(
+            confluence, src, dst,
+            src_username=getattr(args, 'srcUsername', None),
+            dst_username=getattr(args, 'dstUsername', None),
+            jira=jira,
+            dry_run=dry_run
+        )
+        print(f"Personal space: {msg}")
         if args.spaces:
             for s in args.spaces:
                 process_space(config,confluence, s, src, dst, limit=500, dry_run=dry_run)
@@ -588,6 +600,20 @@ def main(argv=None):
         src, dst = args.transferFilters
         jira = get_jira_from_config(config)
         share_all_filters(jira, src, dst, dry_run=getattr(args, 'dry_run', False))
+        ok = True
+
+    if getattr(args, 'copyPersonalSpace', None):
+        src, dst = args.copyPersonalSpace
+        confluence = get_confluence_client(config)
+        jira = get_jira_from_config(config)
+        success, msg = copy_personal_space(
+            confluence, src, dst,
+            src_username=getattr(args, 'srcUsername', None),
+            dst_username=getattr(args, 'dstUsername', None),
+            jira=jira,
+            dry_run=getattr(args, 'dry_run', False)
+        )
+        print(msg)
         ok = True
 
     if getattr(args, 'dups', None):

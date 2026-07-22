@@ -515,3 +515,146 @@ def add_page_favourite(confluence, base_url, account_id, page_id, dry_run=False)
     resp.raise_for_status()
     return resp.json()
 
+
+def get_username_from_accountid(jira, account_id: str) -> str:
+    """
+    Look up username from accountId via Jira user API.
+    Returns username or None if not found.
+    """
+    if jira is None:
+        return None
+    try:
+        user = jira.user(account_id)
+        # The 'name' field is the username
+        username = getattr(user, 'emailAddress', None)
+        if username:
+            # Split on @, remove spaces, lowercase
+            username = username.split('@')[0].replace(' ', '').lower()
+            print(f"  Looked up user: {username} ({getattr(user, 'displayName', '')})")
+            return username
+    except Exception as e:
+        print(f"  User lookup failed: {e}")
+    return None
+
+
+def get_personal_space(confluence, account_id: str, username: str = None, jira=None) -> dict:
+    """
+    Find a user's personal space by accountId or username.
+    Personal space keys in Confluence Cloud:
+    - ~username (older format like ~ykang)
+    - ~accountid_without_colons_and_dashes (newer format)
+      e.g., 712020:c1fcfc8a-1182-487b-8115-7478bfc2d6b8 → ~712020c1fcfc8a1182487b81157478bfc2d6b8
+    Returns the space dict or None if not found.
+    """
+    # Transform: remove : and - from account ID (exact match only)
+    clean_id = account_id.replace(':', '').replace('-', '')
+    
+    # Build list of possible keys to try
+    possible_keys = [
+        f"~{clean_id}",  # e.g., ~712020c1fcfc8a1182487b81157478bfc2d6b8
+    ]
+    
+    # If username provided, try that
+    if username:
+        possible_keys.insert(0, f"~{username}")
+    else:
+        # Try to look up username from accountId via Jira
+        looked_up_username = get_username_from_accountid(jira, account_id)
+        if looked_up_username:
+            possible_keys.insert(0, f"~{looked_up_username}")
+    
+    for space_key in possible_keys:
+        try:
+            space = confluence.get_space(space_key, expand='homepage')
+            if space:
+                print(f"  Found space with key: {space_key}")
+                return space
+        except Exception as e:
+            print(f"  Tried {space_key}: not found")
+    
+    return None
+
+
+def copy_page_to_space(confluence, page_id: str, dst_space_key: str, parent_id: str = None, dry_run: bool = False) -> tuple:
+    """
+    Copy a page to a different space.
+    Returns (success: bool, new_page_id or error_msg)
+    """
+    if dry_run:
+        return True, "dry-run"
+    
+    try:
+        # Get the source page
+        page = confluence.get_page_by_id(page_id, expand='body.storage,version')
+        title = page.get('title')
+        body = page.get('body', {}).get('storage', {}).get('value', '')
+        
+        # Create in destination space
+        new_page = confluence.create_page(
+            space=dst_space_key,
+            title=title,
+            body=body,
+            parent_id=parent_id,
+            representation='storage'
+        )
+        return True, new_page.get('id')
+    except Exception as e:
+        return False, str(e)
+
+
+def copy_personal_space(confluence, src_account_id: str, dst_account_id: str, 
+                        src_username: str = None, dst_username: str = None,
+                        jira=None, dry_run: bool = False) -> tuple:
+    """
+    Copy all pages from src user's personal space to dst user's personal space.
+    Returns (success: bool, message: str)
+    
+    If usernames are not provided, will look up via Jira API.
+    """
+    # Find source space
+    print(f"Looking for source personal space...")
+    src_space = get_personal_space(confluence, src_account_id, src_username, jira=jira)
+    if not src_space:
+        return False, f"No personal space found for {src_account_id}"
+    
+    src_key = src_space.get('key')
+    src_name = src_space.get('name', src_key)
+    print(f"Found source personal space: {src_name} ({src_key})")
+    
+    # Find destination space
+    print(f"Looking for destination personal space...")
+    dst_space = get_personal_space(confluence, dst_account_id, dst_username, jira=jira)
+    if not dst_space:
+        return False, f"No personal space found for {dst_account_id}. User may need to create one first."
+    
+    dst_key = dst_space.get('key')
+    dst_name = dst_space.get('name', dst_key)
+    print(f"Found destination personal space: {dst_name} ({dst_key})")
+    
+    # Get all pages from source space
+    pages = confluence.get_all_pages_from_space(src_key, expand='body.storage')
+    if not pages:
+        return True, f"No pages found in {src_key}"
+    
+    copied = 0
+    failed = 0
+    print(f"Found {len(pages)} pages to copy")
+    
+    for page in pages:
+        page_id = page.get('id')
+        title = page.get('title')
+        
+        if dry_run:
+            print(f"  Would copy: {title}")
+            copied += 1
+        else:
+            success, result = copy_page_to_space(confluence, page_id, dst_key, dry_run=dry_run)
+            if success:
+                print(f"  Copied: {title}")
+                copied += 1
+            else:
+                print(f"  FAILED: {title} - {result}")
+                failed += 1
+    
+    return True, f"Copied {copied} pages, failed {failed}"
+
