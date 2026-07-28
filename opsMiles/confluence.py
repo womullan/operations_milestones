@@ -404,6 +404,10 @@ def process_space(
     limit=50,
     dry_run=False,
 ):
+    """Process a Confluence space to transfer edit permissions and watchers.
+    
+    Returns tuple (edit_count, watch_count) with number of pages modified.
+    """
     start = 0
     count = 0
     wcount = 0
@@ -458,6 +462,7 @@ def process_space(
 
         start += limit
     print (f"Allowed edit on  {count}, watch {wcount}")
+    return count, wcount
 
 
 def list_spaces(confluence, limit=50):

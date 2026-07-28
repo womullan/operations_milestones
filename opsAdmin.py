@@ -16,6 +16,7 @@ import json
 import sys
 from typing import Dict, List
 
+import re
 import requests
 from jira import JIRA, JIRAError
 from requests.auth import HTTPBasicAuth
@@ -556,11 +557,23 @@ def main(argv=None):
         src, dst = args.moveuser
         dry_run = getattr(args, 'dry_run', False)
         jira = get_jira_from_config(config)
+        
+        # Track counts for summary
+        summary = {
+            'reassigned': 0,
+            'watched': 0,
+            'reporter_changed': 0,
+            'filters_shared': 0,
+            'confluence_edit': 0,
+            'confluence_watch': 0,
+            'personal_space_copied': 0,
+        }
+        
         copy_groups(config, src, dst, dry_run=dry_run)
-        share_all_filters(jira, src, dst, dry_run=dry_run)
-        copy_watcher(config, src, dst, pred)
-        copy_reporter(config, src, dst, dry_run, pred)
-        reassign(config, src, dst, dry_run, pred)
+        summary['filters_shared'] = share_all_filters(jira, src, dst, dry_run=dry_run)
+        summary['watched'] = copy_watcher(config, src, dst, pred)
+        summary['reporter_changed'] = copy_reporter(config, src, dst, dry_run, pred)
+        summary['reassigned'] = reassign(config, src, dst, dry_run, pred)
         confluence = get_confluence_client(config)
         # Copy personal space
         success, msg = copy_personal_space(
@@ -571,12 +584,35 @@ def main(argv=None):
             dry_run=dry_run
         )
         print(f"Personal space: {msg}")
+        # Extract copied count from message if present (format: "Copied X pages, failed Y")
+        match = re.search(r'Copied (\d+) pages', msg)
+        if match:
+            summary['personal_space_copied'] = int(match.group(1))
+        
         if args.spaces:
             for s in args.spaces:
-                process_space(config,confluence, s, src, dst, limit=500, dry_run=dry_run)
+                edit_cnt, watch_cnt = process_space(config, confluence, s, src, dst, limit=500, dry_run=dry_run)
+                summary['confluence_edit'] += edit_cnt
+                summary['confluence_watch'] += watch_cnt
         else:
             print ("This will take a long time since it will scan all spaces")
-            process_space(config, confluence, "", src, dst, limit=500, dry_run=dry_run)
+            edit_cnt, watch_cnt = process_space(config, confluence, "", src, dst, limit=500, dry_run=dry_run)
+            summary['confluence_edit'] += edit_cnt
+            summary['confluence_watch'] += watch_cnt
+        
+        # Print summary
+        print("\n" + "=" * 50)
+        print("MOVE USER SUMMARY")
+        print("=" * 50)
+        print(f"Jira tickets reassigned:      {summary['reassigned']}")
+        print(f"Jira tickets watched:         {summary['watched']}")
+        print(f"Jira reporter changed:        {summary['reporter_changed']}")
+        print(f"Jira filters shared:          {summary['filters_shared']}")
+        print(f"Confluence pages edit access: {summary['confluence_edit']}")
+        print(f"Confluence pages watched:     {summary['confluence_watch']}")
+        print(f"Personal space pages copied:  {summary['personal_space_copied']}")
+        print("=" * 50)
+        
         ok = True
 
     if getattr(args, 'reassign', None):
