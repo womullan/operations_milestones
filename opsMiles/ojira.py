@@ -15,10 +15,10 @@ MFIELDS = ["key", "RO Milestone ID", "type", "summary", "duedate", "startdate",
 FIELDS = ["key", "type", "summary", "duedate", "Start date",
            "RubinTeam", "component", "status"]
 
-def list(jira=None, fields=FIELDS, pred2=""):
+def list_rdo_issues(jira=None, fields=FIELDS, pred2=""):
     """
-    Get the  issues from Jira .
-    set pred2="" to restric like "and labels=USDF"
+    Get the issues from Jira RDO project.
+    set pred2="" to restrict like "and labels=USDF"
     """
 
     query = "project = RDO " + pred2

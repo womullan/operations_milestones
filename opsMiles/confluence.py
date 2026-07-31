@@ -451,28 +451,36 @@ def process_space(
             if (pcount % 100) == 0:
                 print (f"Checked {pcount} pages")
 
-            # Check and transfer ownership
-            owner_changed = False
+            # Check ownership first
+            owner_id = ""
             try:
                 owner_id = get_page_owner(confluence, page_id)
-                if owner_id == old_account_id:
-                    if dry_run:
-                        print(f"  Would change owner: {title}")
-                        ocount += 1
-                        owner_changed = True
-                    else:
+            except Exception as e:
+                print(f"  FAILED to get owner: {title} - {e}")
+
+            if owner_id == old_account_id:
+                # Old user owns the page - no need to check edit, just grant and change owner
+                if not dry_run:
+                    try:
+                        add_user_to_update_restriction(confluence, url, page_id, new_account_id, dry_run=False)
+                    except Exception as e:
+                        print(f"  FAILED to add editor: {title} - {e}")
+                
+                if dry_run:
+                    print(f"  Would change owner: {title}")
+                    ocount += 1
+                else:
+                    try:
                         success, msg = set_page_owner(confluence, page_id, new_account_id)
                         if success and msg != "skipped":
                             print(f"  Changed owner: {title}")
                             ocount += 1
-                            owner_changed = True
                         elif not success:
                             print(f"  FAILED to change owner: {title} - {msg}")
-            except Exception as e:
-                print(f"  FAILED to check/change owner: {e}")
-
-            # Check and add edit permissions (skip if owner was changed - owners can edit)
-            if not owner_changed:
+                    except Exception as e:
+                        print(f"  FAILED to change owner: {title} - {e}")
+            else:
+                # Old user doesn't own - use normal allow_edit check
                 try:
                     ok = allow_edit(
                         confluence=confluence,
@@ -483,7 +491,7 @@ def process_space(
                         new_accountid=new_account_id,
                         dry_run=dry_run,
                     )
-                    if ok :
+                    if ok:
                         count += 1
                 except Exception as e:
                     print(f"  FAILED to add editor: {e}")
@@ -664,7 +672,8 @@ def set_page_owner(confluence, page_id: str, owner_account_id: str) -> tuple:
             },
             "version": {
                 "number": current_version + 1,
-                "message": "Updated page owner"
+                "message": "Updated page owner",
+                "minorEdit": True
             },
             "ownerId": owner_account_id
         }
