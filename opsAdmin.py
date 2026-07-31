@@ -22,7 +22,7 @@ from jira import JIRA, JIRAError
 from requests.auth import HTTPBasicAuth
 
 from opsMiles.ojira import get_login_config, list_jira_issues, get_jira_from_config
-from opsMiles.confluence import process_space, get_confluence_client, copy_personal_space
+from opsMiles.confluence import process_space, get_confluence_client, copy_personal_space, update_space_ownership
 
 
 def get_all_atlassian_users(config: Dict, page_size: int = 1000) -> List[Dict]:
@@ -448,6 +448,83 @@ def share_all_filters(jira: JIRA, src: str, dst: str, dry_run: bool = False) -> 
     return shared
 
 
+def get_user_dashboards(jira: JIRA, account_id: str) -> list:
+    """Get all dashboards owned by an account."""
+    url = f'{jira.server_url}/rest/api/3/dashboard/search'
+    params = {'accountId': account_id, 'maxResults': 100}
+    r = jira._session.get(url, params=params)
+    if r.status_code == 200:
+        return r.json().get('values', [])
+    return []
+
+
+def copy_dashboard(jira: JIRA, dashboard_id: str, new_owner_id: str, new_name: str = None) -> tuple:
+    """Copy a dashboard and set the owner to the new user.
+    
+    Returns (success: bool, new_dashboard_id or error_msg)
+    """
+    # First copy the dashboard
+    copy_url = f'{jira.server_url}/rest/api/3/dashboard/{dashboard_id}/copy'
+    copy_payload = {}
+    if new_name:
+        copy_payload['name'] = new_name
+    
+    try:
+        r = jira._session.post(copy_url, json=copy_payload)
+        if r.status_code not in (200, 201):
+            return False, f"Copy failed: HTTP {r.status_code} - {r.text[:200]}"
+        
+        new_dashboard = r.json()
+        new_dashboard_id = new_dashboard.get('id')
+        
+        # Now change the owner using bulk edit
+        edit_url = f'{jira.server_url}/rest/api/3/dashboard/bulk/edit'
+        edit_payload = {
+            'action': 'changeOwner',
+            'entityIds': [int(new_dashboard_id)],
+            'newOwner': new_owner_id,
+            'extendAdminPermissions': True
+        }
+        
+        r2 = jira._session.put(edit_url, json=edit_payload)
+        if r2.status_code not in (200, 204):
+            return True, f"{new_dashboard_id} (warning: owner change failed: {r2.text[:100]})"
+        
+        return True, new_dashboard_id
+    except Exception as e:
+        return False, str(e)
+
+
+def copy_user_dashboards(jira: JIRA, src_account: str, dst_account: str, dry_run: bool = False) -> tuple:
+    """Copy all dashboards from src user to dst user.
+    
+    Returns (copied_count, failed_count)
+    """
+    dashboards = get_user_dashboards(jira, src_account)
+    copied = 0
+    failed = 0
+    print(f"Found {len(dashboards)} dashboards owned by {src_account}")
+    
+    for dash in dashboards:
+        dash_id = dash.get('id')
+        dash_name = dash.get('name', 'Unknown')
+        
+        if dry_run:
+            print(f"  Would copy dashboard {dash_id}: {dash_name}")
+            copied += 1
+        else:
+            success, result = copy_dashboard(jira, dash_id, dst_account)
+            if success:
+                print(f"  Copied dashboard {dash_id}: {dash_name} -> new id: {result}")
+                copied += 1
+            else:
+                print(f"  FAILED dashboard {dash_id}: {dash_name} - {result}")
+                failed += 1
+    
+    print(f"Dashboards: copied={copied} failed={failed}")
+    return copied, failed
+
+
 def reassign(config:dict, src:str, dst:str, dry_run:bool, pred:str) -> int:
     """Reassign tickets from accoutn id src to accountid dst - return the count"""
     jira = get_jira_from_config(config)
@@ -499,7 +576,9 @@ def main(argv=None):
     p.add_argument('--copyWatcher', nargs=2, metavar=('SRC','DST'), help=' Make  DST accountId watch all tickets  watched by SRC accountId')
     p.add_argument('--copyReporter', nargs=2, metavar=('SRC','DST'), help='Change reporter from SRC to DST on all issues reported by SRC')
     p.add_argument('--transferFilters', nargs=2, metavar=('SRC','DST'), help='Transfer all Jira filters owned by SRC to DST accountId')
+    p.add_argument('--copyDashboards', nargs=2, metavar=('SRC','DST'), help='Copy all Jira dashboards from SRC to DST accountId')
     p.add_argument('--copyPersonalSpace', nargs=2, metavar=('SRC','DST'), help='Copy pages from SRC\'s Confluence personal space to DST\'s')
+    p.add_argument('--updateSpaceOwnership', metavar='ACCOUNT_ID', help='Update ownership of all pages in user\'s personal space to that user')
     p.add_argument('--srcUsername', help='Username for SRC personal space lookup (e.g., ykang)')
     p.add_argument('--dstUsername', help='Username for DST personal space lookup')
     p.add_argument('--moveuser', nargs=2, metavar=('SRC','DST'), help=' Copy groups, reassign tickets and copy watcher from  DST accountId to SRC accountId')
@@ -564,6 +643,7 @@ def main(argv=None):
             'watched': 0,
             'reporter_changed': 0,
             'filters_shared': 0,
+            'dashboards_copied': 0,
             'confluence_edit': 0,
             'confluence_watch': 0,
             'personal_space_copied': 0,
@@ -571,6 +651,8 @@ def main(argv=None):
         
         copy_groups(config, src, dst, dry_run=dry_run)
         summary['filters_shared'] = share_all_filters(jira, src, dst, dry_run=dry_run)
+        copied, _ = copy_user_dashboards(jira, src, dst, dry_run=dry_run)
+        summary['dashboards_copied'] = copied
         summary['watched'] = copy_watcher(config, src, dst, pred)
         summary['reporter_changed'] = copy_reporter(config, src, dst, dry_run, pred)
         summary['reassigned'] = reassign(config, src, dst, dry_run, pred)
@@ -608,6 +690,7 @@ def main(argv=None):
         print(f"Jira tickets watched:         {summary['watched']}")
         print(f"Jira reporter changed:        {summary['reporter_changed']}")
         print(f"Jira filters shared:          {summary['filters_shared']}")
+        print(f"Jira dashboards copied:       {summary['dashboards_copied']}")
         print(f"Confluence pages edit access: {summary['confluence_edit']}")
         print(f"Confluence pages watched:     {summary['confluence_watch']}")
         print(f"Personal space pages copied:  {summary['personal_space_copied']}")
@@ -638,6 +721,12 @@ def main(argv=None):
         share_all_filters(jira, src, dst, dry_run=getattr(args, 'dry_run', False))
         ok = True
 
+    if getattr(args, 'copyDashboards', None):
+        src, dst = args.copyDashboards
+        jira = get_jira_from_config(config)
+        copy_user_dashboards(jira, src, dst, dry_run=getattr(args, 'dry_run', False))
+        ok = True
+
     if getattr(args, 'copyPersonalSpace', None):
         src, dst = args.copyPersonalSpace
         confluence = get_confluence_client(config)
@@ -646,6 +735,19 @@ def main(argv=None):
             confluence, src, dst,
             src_username=getattr(args, 'srcUsername', None),
             dst_username=getattr(args, 'dstUsername', None),
+            jira=jira,
+            dry_run=getattr(args, 'dry_run', False)
+        )
+        print(msg)
+        ok = True
+
+    if getattr(args, 'updateSpaceOwnership', None):
+        account_id = args.updateSpaceOwnership
+        confluence = get_confluence_client(config)
+        jira = get_jira_from_config(config)
+        success, msg = update_space_ownership(
+            confluence, account_id,
+            username=getattr(args, 'srcUsername', None),
             jira=jira,
             dry_run=getattr(args, 'dry_run', False)
         )

@@ -580,9 +580,67 @@ def get_personal_space(confluence, account_id: str, username: str = None, jira=N
     return None
 
 
-def copy_page_to_space(confluence, page_id: str, dst_space_key: str, parent_id: str = None, dry_run: bool = False) -> tuple:
+def set_page_owner(confluence, page_id: str, owner_account_id: str) -> tuple:
+    """
+    Set the owner of a Confluence page using REST API v2.
+    Requires fetching the page first to get body and version info.
+    Returns (success: bool, message: str) - returns (True, "skipped") if owner already matches.
+    """
+    try:
+        # Build base URL - handle cases where /wiki may or may not be in confluence.url
+        base_url = confluence.url.rstrip('/')
+        if base_url.endswith('/wiki'):
+            api_base = f"{base_url}/api/v2/pages/{page_id}"
+        else:
+            api_base = f"{base_url}/wiki/api/v2/pages/{page_id}"
+        
+        # First get the current page with body and version
+        get_url = f"{api_base}?body-format=storage"
+        get_response = confluence._session.get(get_url)
+        if get_response.status_code != 200:
+            return False, f"Failed to get page: HTTP {get_response.status_code} - {get_url}"
+        
+        page_data = get_response.json()
+        
+        # Check if owner already matches
+        current_owner = page_data.get('ownerId', '')
+        if current_owner == owner_account_id:
+            return True, "skipped"
+        
+        current_version = page_data.get('version', {}).get('number', 1)
+        title = page_data.get('title', '')
+        body_value = page_data.get('body', {}).get('storage', {}).get('value', '')
+        
+        # Update page with new owner using PUT
+        update_payload = {
+            "id": page_id,
+            "status": "current",
+            "title": title,
+            "body": {
+                "representation": "storage",
+                "value": body_value
+            },
+            "version": {
+                "number": current_version + 1,
+                "message": "Updated page owner"
+            },
+            "ownerId": owner_account_id
+        }
+        
+        response = confluence._session.put(api_base, json=update_payload)
+        if response.status_code in (200, 204):
+            return True, "Owner updated"
+        else:
+            return False, f"HTTP {response.status_code}: {response.text[:200]}"
+    except Exception as e:
+        return False, str(e)
+
+
+def copy_page_to_space(confluence, page_id: str, dst_space_key: str, parent_id: str = None, 
+                       dst_owner_id: str = None, dry_run: bool = False) -> tuple:
     """
     Copy a page to a different space.
+    If dst_owner_id is provided, sets the owner of the new page to that account.
     Returns (success: bool, new_page_id or error_msg)
     """
     if dry_run:
@@ -602,7 +660,15 @@ def copy_page_to_space(confluence, page_id: str, dst_space_key: str, parent_id: 
             parent_id=parent_id,
             representation='storage'
         )
-        return True, new_page.get('id')
+        new_page_id = new_page.get('id')
+        
+        # Set owner if specified
+        if dst_owner_id and new_page_id:
+            success, msg = set_page_owner(confluence, new_page_id, dst_owner_id)
+            if not success:
+                print(f"    Warning: Could not set owner: {msg}")
+        
+        return True, new_page_id
     except Exception as e:
         return False, str(e)
 
@@ -653,13 +719,71 @@ def copy_personal_space(confluence, src_account_id: str, dst_account_id: str,
             print(f"  Would copy: {title}")
             copied += 1
         else:
-            success, result = copy_page_to_space(confluence, page_id, dst_key, dry_run=dry_run)
+            success, result = copy_page_to_space(confluence, page_id, dst_key, 
+                                                  dst_owner_id=dst_account_id, dry_run=dry_run)
             if success:
-                print(f"  Copied: {title}")
+                print(f"  Copied: {title} (owner set to {dst_account_id})")
                 copied += 1
             else:
                 print(f"  FAILED: {title} - {result}")
                 failed += 1
     
     return True, f"Copied {copied} pages, failed {failed}"
+
+
+def update_space_ownership(confluence, account_id: str,
+                           username: str = None, jira=None, dry_run: bool = False) -> tuple:
+    """
+    Update ownership of all pages in a user's personal space to that user.
+    This is useful when pages were copied into a space but have the wrong owner.
+    
+    Args:
+        confluence: Confluence client
+        account_id: Account ID of the user (used to find space and set as owner)
+        username: Optional username to help find the space
+        jira: Optional Jira client for username lookup
+        dry_run: If True, only show what would be done
+        
+    Returns (success: bool, message: str)
+    """
+    # Find the personal space
+    print(f"Looking for personal space for {account_id}...")
+    space = get_personal_space(confluence, account_id, username, jira=jira)
+    if not space:
+        return False, f"No personal space found for {account_id}"
+    
+    space_key = space.get('key')
+    space_name = space.get('name', space_key)
+    print(f"Found personal space: {space_name} ({space_key})")
+    
+    # Get all pages from the space
+    pages = confluence.get_all_pages_from_space(space_key)
+    if not pages:
+        return True, f"No pages found in {space_key}"
+    
+    updated = 0
+    skipped = 0
+    failed = 0
+    print(f"Found {len(pages)} pages to check ownership for {account_id}")
+    
+    for page in pages:
+        page_id = page.get('id')
+        title = page.get('title')
+        
+        if dry_run:
+            print(f"  Would check/update owner: {title}")
+            updated += 1
+        else:
+            success, msg = set_page_owner(confluence, page_id, account_id)
+            if success and msg == "skipped":
+                print(f"  Skipped (already owned): {title}")
+                skipped += 1
+            elif success:
+                print(f"  Updated owner: {title}")
+                updated += 1
+            else:
+                print(f"  FAILED: {title} - {msg}")
+                failed += 1
+    
+    return True, f"Updated {updated} pages, skipped {skipped} (already owned), failed {failed}"
 
