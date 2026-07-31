@@ -395,6 +395,26 @@ def allow_edit(confluence, url, page_id, title, old_accountid,  new_accountid, d
 
 
 
+def get_page_owner(confluence, page_id: str) -> str:
+    """Get the owner ID of a Confluence page using REST API v2.
+    
+    Returns the owner account ID, or empty string if not found.
+    """
+    try:
+        base_url = confluence.url.rstrip('/')
+        if base_url.endswith('/wiki'):
+            api_url = f"{base_url}/api/v2/pages/{page_id}"
+        else:
+            api_url = f"{base_url}/wiki/api/v2/pages/{page_id}"
+        
+        response = confluence._session.get(api_url)
+        if response.status_code == 200:
+            return response.json().get('ownerId', '')
+    except Exception:
+        pass
+    return ''
+
+
 def process_space(
     config,
     confluence,
@@ -404,13 +424,14 @@ def process_space(
     limit=50,
     dry_run=False,
 ):
-    """Process a Confluence space to transfer edit permissions and watchers.
+    """Process a Confluence space to transfer edit permissions, watchers, and ownership.
     
-    Returns tuple (edit_count, watch_count) with number of pages modified.
+    Returns tuple (edit_count, watch_count, owner_count) with number of pages modified.
     """
     start = 0
     count = 0
     wcount = 0
+    ocount = 0
     pcount = 0
     while True:
         pages = confluence.get_all_pages_from_space(
@@ -430,21 +451,42 @@ def process_space(
             if (pcount % 100) == 0:
                 print (f"Checked {pcount} pages")
 
-            # Cannot Transfer ownership - can make sure editable
+            # Check and transfer ownership
+            owner_changed = False
             try:
-                ok = allow_edit(
-                    confluence=confluence,
-                    url=url,
-                    page_id=page_id,
-                    title=title,
-                    old_accountid=old_account_id,
-                    new_accountid=new_account_id,
-                    dry_run=dry_run,
-                )
-                if ok :
-                    count += 1
+                owner_id = get_page_owner(confluence, page_id)
+                if owner_id == old_account_id:
+                    if dry_run:
+                        print(f"  Would change owner: {title}")
+                        ocount += 1
+                        owner_changed = True
+                    else:
+                        success, msg = set_page_owner(confluence, page_id, new_account_id)
+                        if success and msg != "skipped":
+                            print(f"  Changed owner: {title}")
+                            ocount += 1
+                            owner_changed = True
+                        elif not success:
+                            print(f"  FAILED to change owner: {title} - {msg}")
             except Exception as e:
-                print(f"  FAILED to add editor: {e}")
+                print(f"  FAILED to check/change owner: {e}")
+
+            # Check and add edit permissions (skip if owner was changed - owners can edit)
+            if not owner_changed:
+                try:
+                    ok = allow_edit(
+                        confluence=confluence,
+                        url=url,
+                        page_id=page_id,
+                        title=title,
+                        old_accountid=old_account_id,
+                        new_accountid=new_account_id,
+                        dry_run=dry_run,
+                    )
+                    if ok :
+                        count += 1
+                except Exception as e:
+                    print(f"  FAILED to add editor: {e}")
 
             # Transfer watcher
             if page_has_watcher(confluence, page_id, old_account_id):
@@ -461,8 +503,8 @@ def process_space(
                     print(f"  FAILED to add watcher: {e}")
 
         start += limit
-    print (f"Allowed edit on  {count}, watch {wcount}")
-    return count, wcount
+    print (f"Allowed edit on {count}, watch {wcount}, changed owner {ocount}")
+    return count, wcount, ocount
 
 
 def list_spaces(confluence, limit=50):

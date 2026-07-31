@@ -21,40 +21,17 @@ import requests
 from jira import JIRA, JIRAError
 from requests.auth import HTTPBasicAuth
 
-from opsMiles.ojira import get_login_config, list_jira_issues, get_jira_from_config
+from opsMiles.ojira import (
+    get_login_config, list_jira_issues, get_jira_from_config,
+    get_all_atlassian_users, get_account_ids_by_display_prefix,
+    list_user_groups, add_user_to_group, copy_groups,
+    get_issues_assigned, get_issues_watched, get_issues_reported,
+    add_watcher, copy_watcher, assign_issue_quiet,
+    change_reporter_quiet, copy_reporter, reassign,
+    get_user_filters, share_filter, share_all_filters,
+    get_user_dashboards, copy_dashboard, copy_user_dashboards
+)
 from opsMiles.confluence import process_space, get_confluence_client, copy_personal_space, update_space_ownership
-
-
-def get_all_atlassian_users(config: Dict, page_size: int = 1000) -> List[Dict]:
-    """Fetch all users from Atlassian REST /rest/api/3/users/search (paged).
-
-    Returns list of user dicts as returned by the API.
-    """
-    base = config.get('url')
-    if not base:
-        raise ValueError('Missing url in config')
-    url = base.rstrip('/') + '/rest/api/3/users/search'
-    auth = HTTPBasicAuth(config.get('user'), config.get('password'))
-
-    users = []
-    start_at = 0
-    while True:
-        params = {'startAt': start_at, 'maxResults': page_size}
-        r = requests.get(url, auth=auth, params=params)
-        if r.status_code >= 400:
-            raise RuntimeError(f'Failed to fetch users: {r.status_code} {r.text}')
-        page = r.json()
-        if not isinstance(page, list):
-            # Some instances may return an object; handle gracefully
-            raise RuntimeError(f'unexpected users response: {page}')
-        for u in page:
-            if isinstance(u, dict) and u.get('active'):
-               users.append(u)
-
-        if len(page) < page_size:
-            break
-        start_at += page_size
-    return users
 
 
 def find_duplicate_displayname_users(users: List[Dict]):
@@ -88,31 +65,7 @@ def find_duplicate_displayname_users(users: List[Dict]):
     return dups
 
 
-def list_user_groups(config: Dict, account_id: str) -> List[Dict]:
-    """Minimal routine: return groups for an Atlassian accountId.
-
-    Calls /rest/api/3/user/groups?accountId=... and returns the list (handles
-    either list or paged dict with 'values'). No extras, no debug.
-    """
-    base = config.get('url')
-    if not base:
-        raise ValueError('Missing url in config')
-    url = base.rstrip('/') + '/rest/api/3/user/groups'
-    auth = HTTPBasicAuth(config.get('user'), config.get('password'))
-
-    params = {'accountId': account_id, 'maxResults': 100}
-    r = requests.get(url, auth=auth, params=params)
-    if r.status_code >= 400:
-        raise RuntimeError(f'Failed to fetch groups for {account_id}: {r.status_code} {r.text}')
-    page = r.json()
-    if isinstance(page, list):
-        return page
-    if isinstance(page, dict):
-        return page.get('values') or page.get('groups') or []
-    return []
-
-
-# New helper: print groups for an account id (no-frills)
+# Helper: print groups for an account id (no-frills)
 def print_groups_for_account(config: Dict, account_id: str) -> None:
     groups = list_user_groups(config, account_id)
     if not groups:
@@ -579,11 +532,12 @@ def main(argv=None):
     p.add_argument('--copyDashboards', nargs=2, metavar=('SRC','DST'), help='Copy all Jira dashboards from SRC to DST accountId')
     p.add_argument('--copyPersonalSpace', nargs=2, metavar=('SRC','DST'), help='Copy pages from SRC\'s Confluence personal space to DST\'s')
     p.add_argument('--updateSpaceOwnership', metavar='ACCOUNT_ID', help='Update ownership of all pages in user\'s personal space to that user')
+    p.add_argument('--processConfluence', nargs=2, metavar=('SRC','DST'), help='Process Confluence spaces: transfer edit perms, watchers, and ownership from SRC to DST')
     p.add_argument('--srcUsername', help='Username for SRC personal space lookup (e.g., ykang)')
     p.add_argument('--dstUsername', help='Username for DST personal space lookup')
     p.add_argument('--moveuser', nargs=2, metavar=('SRC','DST'), help=' Copy groups, reassign tickets and copy watcher from  DST accountId to SRC accountId')
     p.add_argument('--predicate', help=' partial predicate to pass to jira  like "and project=SE"')
-    p.add_argument('--spaces', nargs='+', help=' for move user:one or more space names for confluence reasignment like DM EPO LSSTOps')
+    p.add_argument('--spaces', nargs='+', help='Space names for --processConfluence or --moveuser (e.g., DM EPO LSSTOps). Omit to scan all spaces.')
 
     args = p.parse_args(argv)
     # reuse existing helper to build login config
@@ -646,6 +600,7 @@ def main(argv=None):
             'dashboards_copied': 0,
             'confluence_edit': 0,
             'confluence_watch': 0,
+            'confluence_owner': 0,
             'personal_space_copied': 0,
         }
         
@@ -673,14 +628,16 @@ def main(argv=None):
         
         if args.spaces:
             for s in args.spaces:
-                edit_cnt, watch_cnt = process_space(config, confluence, s, src, dst, limit=500, dry_run=dry_run)
+                edit_cnt, watch_cnt, owner_cnt = process_space(config, confluence, s, src, dst, limit=500, dry_run=dry_run)
                 summary['confluence_edit'] += edit_cnt
                 summary['confluence_watch'] += watch_cnt
+                summary['confluence_owner'] += owner_cnt
         else:
             print ("This will take a long time since it will scan all spaces")
-            edit_cnt, watch_cnt = process_space(config, confluence, "", src, dst, limit=500, dry_run=dry_run)
+            edit_cnt, watch_cnt, owner_cnt = process_space(config, confluence, "", src, dst, limit=500, dry_run=dry_run)
             summary['confluence_edit'] += edit_cnt
             summary['confluence_watch'] += watch_cnt
+            summary['confluence_owner'] += owner_cnt
         
         # Print summary
         print("\n" + "=" * 50)
@@ -693,6 +650,7 @@ def main(argv=None):
         print(f"Jira dashboards copied:       {summary['dashboards_copied']}")
         print(f"Confluence pages edit access: {summary['confluence_edit']}")
         print(f"Confluence pages watched:     {summary['confluence_watch']}")
+        print(f"Confluence pages owner changed: {summary['confluence_owner']}")
         print(f"Personal space pages copied:  {summary['personal_space_copied']}")
         print("=" * 50)
         
@@ -752,6 +710,37 @@ def main(argv=None):
             dry_run=getattr(args, 'dry_run', False)
         )
         print(msg)
+        ok = True
+
+    if getattr(args, 'processConfluence', None):
+        src, dst = args.processConfluence
+        confluence = get_confluence_client(config)
+        dry_run = getattr(args, 'dry_run', False)
+        total_edit = 0
+        total_watch = 0
+        total_owner = 0
+        
+        if args.spaces:
+            for s in args.spaces:
+                print(f"\nProcessing space: {s}")
+                edit_cnt, watch_cnt, owner_cnt = process_space(config, confluence, s, src, dst, limit=500, dry_run=dry_run)
+                total_edit += edit_cnt
+                total_watch += watch_cnt
+                total_owner += owner_cnt
+        else:
+            print("Processing all spaces (this may take a long time)...")
+            edit_cnt, watch_cnt, owner_cnt = process_space(config, confluence, "", src, dst, limit=500, dry_run=dry_run)
+            total_edit = edit_cnt
+            total_watch = watch_cnt
+            total_owner = owner_cnt
+        
+        print("\n" + "=" * 50)
+        print("CONFLUENCE PROCESSING SUMMARY")
+        print("=" * 50)
+        print(f"Pages with edit access granted: {total_edit}")
+        print(f"Pages with watcher added:       {total_watch}")
+        print(f"Pages with owner changed:       {total_owner}")
+        print("=" * 50)
         ok = True
 
     if getattr(args, 'dups', None):
