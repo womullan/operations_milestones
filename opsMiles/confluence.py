@@ -18,15 +18,27 @@ import sys
 from urllib.parse import quote
 from atlassian import Confluence
 
-def get_confluence_client(config: dict) -> Confluence:
+def get_confluence_client(config: dict, admin_key: bool = False) -> Confluence:
     """Create a Confluence client from login config dict.
     config keys expected: url, user, password
+    
+    If admin_key=True, adds the Atl-Confluence-With-Admin-Key header to bypass
+    page restrictions (requires Confluence Cloud Premium/Enterprise and site admin).
     """
     url = config.get("url")
     username = config.get("user")
     password = config.get("password")
     # atlassian.Confluence accepts cloud if using Atlassian Cloud; leave defaults.
-    return Confluence(url=url, username=username, password=password)
+    confluence = Confluence(url=url, username=username, password=password)
+    
+    if admin_key:
+        # Add admin key header to bypass page restrictions
+        confluence._session.headers.update({
+            'Atl-Confluence-With-Admin-Key': 'true'
+        })
+        print("Admin key mode enabled - bypassing page restrictions")
+    
+    return confluence
 
 
 def _paginate_cql(confluence: Confluence, cql: str):
@@ -294,17 +306,24 @@ def can_user_update_page(session, base_url, page_id, account_id):
     """
     True iff 'account_id' can UPDATE (edit) this page, considering
     site + space + content restrictions.
+    Returns False on 404 (page not found or permission check not supported).
     """
-    r = session.post(
-        f"{base_url.rstrip('/')}/rest/api/content/{page_id}/permission/check",
-        json={
-            "subject": {"type": "user", "identifier": account_id},
-            "operation": "update",
-        },
-        headers={"Accept": "application/json"},
-    )
-    r.raise_for_status()
-    return bool(r.json().get("hasPermission"))
+    try:
+        r = session.post(
+            f"{base_url.rstrip('/')}/rest/api/content/{page_id}/permission/check",
+            json={
+                "subject": {"type": "user", "identifier": account_id},
+                "operation": "update",
+            },
+            headers={"Accept": "application/json"},
+        )
+        if r.status_code == 404:
+            # Page not found or permission check not supported
+            return False
+        r.raise_for_status()
+        return bool(r.json().get("hasPermission"))
+    except Exception:
+        return False
 
 
 def _put_update_editor(confluence, page_id: str, account_id: str):

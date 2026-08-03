@@ -31,7 +31,10 @@ from opsMiles.ojira import (
     get_user_filters, share_filter, share_all_filters,
     get_user_dashboards, copy_dashboard, copy_user_dashboards
 )
-from opsMiles.confluence import process_space, get_confluence_client, copy_personal_space, update_space_ownership
+from opsMiles.confluence import (
+    process_space, get_confluence_client, copy_personal_space, update_space_ownership,
+    extract_page_id_from_url, get_page_owner, set_page_owner, add_user_to_update_restriction
+)
 
 
 def find_duplicate_displayname_users(users: List[Dict]):
@@ -538,6 +541,9 @@ def main(argv=None):
     p.add_argument('--moveuser', nargs=2, metavar=('SRC','DST'), help=' Copy groups, reassign tickets and copy watcher from  DST accountId to SRC accountId')
     p.add_argument('--predicate', help=' partial predicate to pass to jira  like "and project=SE"')
     p.add_argument('--spaces', nargs='+', help='Space names for --processConfluence or --moveuser (e.g., DM EPO LSSTOps). Omit to scan all spaces.')
+    p.add_argument('--pageid', help='Process a single Confluence page by ID (use with --processConfluence)')
+    p.add_argument('--page-url', help='Process a single Confluence page by URL (use with --processConfluence)')
+    p.add_argument('--admin-key', action='store_true', help='Use Confluence admin key to bypass page restrictions (requires Premium/Enterprise and site admin)')
 
     args = p.parse_args(argv)
     # reuse existing helper to build login config
@@ -611,7 +617,7 @@ def main(argv=None):
         summary['watched'] = copy_watcher(config, src, dst, pred)
         summary['reporter_changed'] = copy_reporter(config, src, dst, dry_run, pred)
         summary['reassigned'] = reassign(config, src, dst, dry_run, pred)
-        confluence = get_confluence_client(config)
+        confluence = get_confluence_client(config, admin_key=getattr(args, 'admin_key', False))
         # Copy personal space
         success, msg = copy_personal_space(
             confluence, src, dst,
@@ -687,7 +693,7 @@ def main(argv=None):
 
     if getattr(args, 'copyPersonalSpace', None):
         src, dst = args.copyPersonalSpace
-        confluence = get_confluence_client(config)
+        confluence = get_confluence_client(config, admin_key=getattr(args, 'admin_key', False))
         jira = get_jira_from_config(config)
         success, msg = copy_personal_space(
             confluence, src, dst,
@@ -701,7 +707,7 @@ def main(argv=None):
 
     if getattr(args, 'updateSpaceOwnership', None):
         account_id = args.updateSpaceOwnership
-        confluence = get_confluence_client(config)
+        confluence = get_confluence_client(config, admin_key=getattr(args, 'admin_key', False))
         jira = get_jira_from_config(config)
         success, msg = update_space_ownership(
             confluence, account_id,
@@ -714,33 +720,67 @@ def main(argv=None):
 
     if getattr(args, 'processConfluence', None):
         src, dst = args.processConfluence
-        confluence = get_confluence_client(config)
+        confluence = get_confluence_client(config, admin_key=getattr(args, 'admin_key', False))
         dry_run = getattr(args, 'dry_run', False)
-        total_edit = 0
-        total_watch = 0
-        total_owner = 0
+        url = f'{config.get("url")}/wiki/'
         
-        if args.spaces:
-            for s in args.spaces:
-                print(f"\nProcessing space: {s}")
-                edit_cnt, watch_cnt, owner_cnt = process_space(config, confluence, s, src, dst, limit=500, dry_run=dry_run)
-                total_edit += edit_cnt
-                total_watch += watch_cnt
-                total_owner += owner_cnt
+        # Check for single page processing
+        page_id = getattr(args, 'pageid', None)
+        if not page_id and getattr(args, 'page_url', None):
+            page_id = extract_page_id_from_url(args.page_url)
+        
+        if page_id:
+            # Process single page
+            print(f"Processing single page: {page_id}")
+            owner_id = get_page_owner(confluence, page_id)
+            print(f"  Current owner: {owner_id}")
+            
+            if owner_id == src:
+                # Old user owns - grant edit and change owner
+                if not dry_run:
+                    try:
+                        add_user_to_update_restriction(confluence, url, page_id, dst, dry_run=False)
+                        print(f"  Granted edit to {dst}")
+                    except Exception as e:
+                        print(f"  FAILED to add editor: {e}")
+                
+                if dry_run:
+                    print(f"  Would change owner to {dst}")
+                else:
+                    success, msg = set_page_owner(confluence, page_id, dst)
+                    if success:
+                        print(f"  Changed owner to {dst}")
+                    else:
+                        print(f"  FAILED to change owner: {msg}")
+            else:
+                print(f"  Page not owned by {src}, skipping owner change")
         else:
-            print("Processing all spaces (this may take a long time)...")
-            edit_cnt, watch_cnt, owner_cnt = process_space(config, confluence, "", src, dst, limit=500, dry_run=dry_run)
-            total_edit = edit_cnt
-            total_watch = watch_cnt
-            total_owner = owner_cnt
-        
-        print("\n" + "=" * 50)
-        print("CONFLUENCE PROCESSING SUMMARY")
-        print("=" * 50)
-        print(f"Pages with edit access granted: {total_edit}")
-        print(f"Pages with watcher added:       {total_watch}")
-        print(f"Pages with owner changed:       {total_owner}")
-        print("=" * 50)
+            # Process spaces
+            total_edit = 0
+            total_watch = 0
+            total_owner = 0
+            
+            if args.spaces:
+                for s in args.spaces:
+                    print(f"\nProcessing space: {s}")
+                    edit_cnt, watch_cnt, owner_cnt = process_space(config, confluence, s, src, dst, limit=500, dry_run=dry_run)
+                    total_edit += edit_cnt
+                    total_watch += watch_cnt
+                    total_owner += owner_cnt
+            else:
+                print("Processing all spaces (this may take a long time)...")
+                edit_cnt, watch_cnt, owner_cnt = process_space(config, confluence, "", src, dst, limit=500, dry_run=dry_run)
+                total_edit = edit_cnt
+                total_watch = watch_cnt
+                total_owner = owner_cnt
+            
+            print("\n" + "=" * 50)
+            print("CONFLUENCE PROCESSING SUMMARY")
+            print("=" * 50)
+            print(f"Pages with edit access granted: {total_edit}")
+            print(f"Pages with watcher added:       {total_watch}")
+            print(f"Pages with owner changed:       {total_owner}")
+            print("=" * 50)
         ok = True
 
     if getattr(args, 'dups', None):
