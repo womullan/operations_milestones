@@ -445,6 +445,180 @@ def copy_reporter(config: dict, src: str, dst: str, dry_run: bool, pred: str) ->
     return count
 
 
+def list_user_fields(jira: JIRA) -> list:
+    """List all Jira fields that are user-type fields.
+    
+    Returns list of dicts with 'id', 'name', and 'custom' keys.
+    """
+    user_fields = []
+    try:
+        fields = jira.fields()
+        for field in fields:
+            # Check if it's a user-type field by schema
+            schema = field.get('schema', {})
+            field_type = schema.get('type', '')
+            # User fields have type 'user' or custom type containing 'user'
+            if field_type == 'user' or 'user' in field_type.lower():
+                user_fields.append({
+                    'id': field.get('id', ''),
+                    'name': field.get('name', ''),
+                    'custom': field.get('custom', False)
+                })
+    except Exception as e:
+        print(f"Error listing fields: {e}")
+    return user_fields
+
+
+def get_reviewer_field_id(jira: JIRA, field_name: str = 'Reviewer') -> str:
+    """Get the custom field ID for the specified reviewer field.
+    
+    Args:
+        jira: JIRA client
+        field_name: Name of the reviewer field (default: 'Reviewer')
+    
+    Returns the field ID (e.g., 'customfield_10100') or empty string if not found.
+    """
+    try:
+        fields = jira.fields()
+        # First try exact match (case-insensitive)
+        for field in fields:
+            if field.get('name', '').lower() == field_name.lower():
+                return field.get('id', '')
+        # Then try contains match
+        for field in fields:
+            if field_name.lower() in field.get('name', '').lower():
+                print(f"Found partial match: '{field.get('name')}' for '{field_name}'")
+                return field.get('id', '')
+    except Exception as e:
+        print(f"Error searching for field: {e}")
+    return ''
+
+
+def get_issues_reviewed(jira: JIRA, account_id: str, pred: str, field_id: str = None, field_name: str = 'Reviewer') -> list:
+    """Return the issues where account_id is the reviewer.
+    
+    Args:
+        jira: JIRA client
+        account_id: The account ID to search for
+        pred: Additional JQL predicate
+        field_id: The custom field ID (e.g., 'customfield_10048') - preferred for JQL
+        field_name: Name of the reviewer field (fallback if field_id not provided)
+    """
+    # Use cf[NNNNN] format for custom fields in JQL - more reliable than quoted name
+    if field_id and field_id.startswith('customfield_'):
+        cf_num = field_id.replace('customfield_', '')
+        jql_field = f'cf[{cf_num}]'
+    else:
+        jql_field = f'"{field_name}"'
+    
+    issues = list_jira_issues(jira, query=f'project != PREOPS and {jql_field} = {account_id}', pred2=pred)
+    return issues
+
+
+def change_reviewer_quiet(jira: JIRA, issue_key: str, account_id: str, field_id: str) -> tuple:
+    """Change reviewer on issue without sending notification.
+    
+    Args:
+        jira: JIRA client
+        issue_key: The issue key (e.g., 'PROJ-123')
+        account_id: The account ID of the new reviewer
+        field_id: The custom field ID for reviewer (e.g., 'customfield_10100')
+    
+    Returns (success: bool, error_msg: str or None)
+    """
+    from jira import JIRAError
+    
+    if not field_id:
+        return False, "Reviewer field ID not found"
+    
+    # Reviewer field is typically a multi-user field, so use array format
+    user_value = [{'accountId': account_id}]
+    
+    try:
+        issue = jira.issue(issue_key)
+        issue.update(fields={field_id: user_value}, notify=False)
+        return True, None
+    except JIRAError:
+        pass
+    except Exception:
+        pass
+    
+    # Fallback to direct REST API
+    url = f'{jira.server_url}/rest/api/3/issue/{issue_key}?notifyUsers=false'
+    payload = {'fields': {field_id: user_value}}
+    try:
+        r = jira._session.put(url, json=payload)
+        if r.status_code in (200, 204):
+            return True, None
+        try:
+            err = r.json().get('errorMessages', [r.text])
+            errors = r.json().get('errors', {})
+            if errors:
+                err_msg = str(errors)
+            elif err:
+                err_msg = '; '.join(err) if isinstance(err, list) else str(err)
+            else:
+                err_msg = f'{r.status_code}: {r.text}'
+        except Exception:
+            err_msg = f'{r.status_code}: {r.text}'
+        return False, err_msg
+    except JIRAError as e:
+        return False, e.text
+    except Exception as e:
+        return False, str(e)
+
+
+def copy_reviewer(config: dict, src: str, dst: str, dry_run: bool, pred: str, field_name: str = 'Reviewer') -> int:
+    """Change reviewer from src to dst on all issues where src is reviewer.
+    
+    Args:
+        config: Login config dict
+        src: Source account ID
+        dst: Destination account ID  
+        dry_run: If True, only show what would be done
+        pred: Additional JQL predicate
+        field_name: Name of the reviewer field (default: 'Reviewer')
+    """
+    jira = get_jira_from_config(config)
+    
+    # Get the reviewer field ID
+    field_id = get_reviewer_field_id(jira, field_name)
+    if not field_id:
+        print(f"ERROR: Could not find '{field_name}' custom field in Jira")
+        print("Use --listUserFields to see available user-type fields")
+        return 0
+    print(f"Found '{field_name}' field: {field_id}")
+    
+    try:
+        dst_user = jira.user(dst)
+        print(f"Destination user: {dst_user.displayName} ({dst})")
+    except Exception as e:
+        print(f"WARNING: Could not verify destination user {dst}: {e}")
+    
+    issues = get_issues_reviewed(jira, src, pred, field_id=field_id, field_name=field_name)
+    tot = len(issues)
+    print(f"Got {tot} where {src} is {field_name}")
+    count = 0
+    problem = []
+    if dry_run:
+        print("NO changes - dry run only")
+    for i in issues:
+        if dry_run:
+            print(f"  Would change reviewer on {i.key}")
+        else:
+            success, err = change_reviewer_quiet(jira, i.key, dst, field_id)
+            if success:
+                print(f"Changed reviewer ({count}/{tot}) {i.key}")
+                count += 1
+            else:
+                print(f"FAILED to change reviewer on {i.key}: {err}")
+                problem.append(i.key)
+    if not dry_run and problem:
+        print(f"Of {tot} issues, changed {count}. PROBLEMS with: {problem}")
+    print("PREOPS is ignored")
+    return count
+
+
 def reassign(config: dict, src: str, dst: str, dry_run: bool, pred: str) -> int:
     """Reassign tickets from src to dst account. Returns the count."""
     from jira import JIRAError

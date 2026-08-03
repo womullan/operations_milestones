@@ -27,9 +27,10 @@ from opsMiles.ojira import (
     list_user_groups, add_user_to_group, copy_groups,
     get_issues_assigned, get_issues_watched, get_issues_reported,
     add_watcher, copy_watcher, assign_issue_quiet,
-    change_reporter_quiet, copy_reporter, reassign,
+    change_reporter_quiet, copy_reporter, copy_reviewer, reassign,
     get_user_filters, share_filter, share_all_filters,
-    get_user_dashboards, copy_dashboard, copy_user_dashboards
+    get_user_dashboards, copy_dashboard, copy_user_dashboards,
+    list_user_fields
 )
 from opsMiles.confluence import (
     process_space, get_confluence_client, copy_personal_space, update_space_ownership,
@@ -531,6 +532,9 @@ def main(argv=None):
     p.add_argument('--reassign', nargs=2, metavar=('SRC','DST'), help='Change assignee of all tickets assigned to SRC to DST accountId')
     p.add_argument('--copyWatcher', nargs=2, metavar=('SRC','DST'), help=' Make  DST accountId watch all tickets  watched by SRC accountId')
     p.add_argument('--copyReporter', nargs=2, metavar=('SRC','DST'), help='Change reporter from SRC to DST on all issues reported by SRC')
+    p.add_argument('--assignReviewer', nargs=2, metavar=('SRC','DST'), help='Change reviewer from SRC to DST on all issues where SRC is reviewer')
+    p.add_argument('--reviewerField', default='Reviewer', help='Name of the reviewer field in Jira (default: Reviewer)')
+    p.add_argument('--listUserFields', action='store_true', help='List all user-type fields in Jira')
     p.add_argument('--transferFilters', nargs=2, metavar=('SRC','DST'), help='Transfer all Jira filters owned by SRC to DST accountId')
     p.add_argument('--copyDashboards', nargs=2, metavar=('SRC','DST'), help='Copy all Jira dashboards from SRC to DST accountId')
     p.add_argument('--copyPersonalSpace', nargs=2, metavar=('SRC','DST'), help='Copy pages from SRC\'s Confluence personal space to DST\'s')
@@ -602,6 +606,7 @@ def main(argv=None):
             'reassigned': 0,
             'watched': 0,
             'reporter_changed': 0,
+            'reviewer_changed': 0,
             'filters_shared': 0,
             'dashboards_copied': 0,
             'confluence_edit': 0,
@@ -616,6 +621,7 @@ def main(argv=None):
         summary['dashboards_copied'] = copied
         summary['watched'] = copy_watcher(config, src, dst, pred)
         summary['reporter_changed'] = copy_reporter(config, src, dst, dry_run, pred)
+        summary['reviewer_changed'] = copy_reviewer(config, src, dst, dry_run, pred, getattr(args, 'reviewerField', 'Reviewer'))
         summary['reassigned'] = reassign(config, src, dst, dry_run, pred)
         confluence = get_confluence_client(config, admin_key=getattr(args, 'admin_key', False))
         # Copy personal space
@@ -652,6 +658,7 @@ def main(argv=None):
         print(f"Jira tickets reassigned:      {summary['reassigned']}")
         print(f"Jira tickets watched:         {summary['watched']}")
         print(f"Jira reporter changed:        {summary['reporter_changed']}")
+        print(f"Jira reviewer changed:        {summary['reviewer_changed']}")
         print(f"Jira filters shared:          {summary['filters_shared']}")
         print(f"Jira dashboards copied:       {summary['dashboards_copied']}")
         print(f"Confluence pages edit access: {summary['confluence_edit']}")
@@ -677,6 +684,23 @@ def main(argv=None):
     if getattr(args, 'copyReporter', None):
         src, dst = args.copyReporter
         copy_reporter(config, src, dst, getattr(args, 'dry_run', False), pred)
+        ok = True
+
+    # list user fields
+    if getattr(args, 'listUserFields', False):
+        jira = get_jira_from_config(config)
+        fields = list_user_fields(jira)
+        print(f"Found {len(fields)} user-type fields:")
+        for f in fields:
+            custom = " (custom)" if f['custom'] else ""
+            print(f"  {f['name']}: {f['id']}{custom}")
+        ok = True
+
+    # copy reviewer operation
+    if getattr(args, 'assignReviewer', None):
+        src, dst = args.assignReviewer
+        field_name = getattr(args, 'reviewerField', 'Reviewer')
+        copy_reviewer(config, src, dst, getattr(args, 'dry_run', False), pred, field_name)
         ok = True
 
     if getattr(args, 'transferFilters', None):
