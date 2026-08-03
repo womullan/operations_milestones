@@ -747,6 +747,286 @@ def copy_page_to_space(confluence, page_id: str, dst_space_key: str, parent_id: 
         return False, str(e)
 
 
+def create_personal_space(confluence, account_id: str, display_name: str = None) -> tuple:
+    """
+    Create a personal space for a user if it doesn't exist.
+    
+    Returns (success: bool, space_key: str or error_msg)
+    """
+    # Build the space key from account ID (remove : and -)
+    clean_id = account_id.replace(':', '').replace('-', '')
+    space_key = f"~{clean_id}"
+    
+    # Check if space already exists
+    try:
+        existing = confluence.get_space(space_key)
+        if existing:
+            return True, space_key
+    except Exception:
+        pass  # Space doesn't exist, create it
+    
+    # Create the space
+    space_name = f"{display_name}'s Space" if display_name else f"Personal Space {space_key}"
+    try:
+        base_url = confluence.url.rstrip('/')
+        if base_url.endswith('/wiki'):
+            api_url = f"{base_url}/api/v2/spaces"
+        else:
+            api_url = f"{base_url}/wiki/api/v2/spaces"
+        
+        payload = {
+            "key": space_key,
+            "name": space_name,
+            "type": "personal"
+        }
+        
+        response = confluence._session.post(api_url, json=payload)
+        if response.status_code in (200, 201):
+            print(f"Created personal space: {space_key}")
+            return True, space_key
+        else:
+            return False, f"Failed to create space: HTTP {response.status_code} - {response.text[:200]}"
+    except Exception as e:
+        return False, str(e)
+
+
+def move_page_to_space(confluence, page_id: str, dst_space_key: str, dst_parent_id: str = None) -> tuple:
+    """
+    Move a page to a different space.
+    
+    Returns (success: bool, message: str)
+    """
+    try:
+        base_url = confluence.url.rstrip('/')
+        if base_url.endswith('/wiki'):
+            api_url = f"{base_url}/api/v2/pages/{page_id}/move"
+        else:
+            api_url = f"{base_url}/wiki/api/v2/pages/{page_id}/move"
+        
+        payload = {
+            "spaceId": None,  # Will be filled in
+            "targetKey": dst_space_key
+        }
+        
+        # Get the destination space ID
+        try:
+            dst_space = confluence.get_space(dst_space_key)
+            if dst_space:
+                space_id = dst_space.get('id')
+                if space_id:
+                    payload["spaceId"] = space_id
+        except Exception:
+            pass
+        
+        # If we have a parent, set it
+        if dst_parent_id:
+            payload["parentId"] = dst_parent_id
+        
+        # Try using the move endpoint (Confluence Cloud)
+        response = confluence._session.post(api_url, json=payload)
+        if response.status_code in (200, 201, 204):
+            return True, "moved"
+        
+        # Fallback: Update page with new space using v1 API
+        # Get the page first
+        page = confluence.get_page_by_id(page_id, expand='body.storage,version,space')
+        if not page:
+            return False, "Page not found"
+        
+        title = page.get('title')
+        body = page.get('body', {}).get('storage', {}).get('value', '')
+        version = page.get('version', {}).get('number', 1)
+        
+        # Use the v1 API to update page with new space
+        update_url = f"{confluence.url.rstrip('/')}/rest/api/content/{page_id}"
+        if not confluence.url.rstrip('/').endswith('/wiki'):
+            update_url = f"{confluence.url.rstrip('/')}/wiki/rest/api/content/{page_id}"
+        
+        update_payload = {
+            "type": "page",
+            "title": title,
+            "space": {"key": dst_space_key},
+            "body": {
+                "storage": {
+                    "value": body,
+                    "representation": "storage"
+                }
+            },
+            "version": {"number": version + 1}
+        }
+        
+        if dst_parent_id:
+            update_payload["ancestors"] = [{"id": dst_parent_id}]
+        
+        response = confluence._session.put(update_url, json=update_payload)
+        if response.status_code in (200, 201):
+            return True, "moved via update"
+        else:
+            error_text = response.text[:300]
+            # Check if page already exists in destination
+            if 'content with the name' in error_text.lower() or 'already exists' in error_text.lower():
+                return True, "skipped - already exists in destination"
+            return False, f"HTTP {response.status_code}: {error_text}"
+            
+    except Exception as e:
+        error_str = str(e)
+        # Check if page already exists in destination
+        if 'content with the name' in error_str.lower() or 'already exists' in error_str.lower():
+            return True, "skipped - already exists in destination"
+        return False, error_str
+
+
+def move_personal_space(confluence, src_account_id: str, dst_account_id: str,
+                        src_username: str = None, dst_username: str = None,
+                        jira=None, dry_run: bool = False) -> tuple:
+    """
+    Move all pages from src user's personal space to dst user's personal space.
+    Creates the destination space if it doesn't exist.
+    
+    Returns (success: bool, message: str, moved_count: int)
+    """
+    # Find source space
+    print(f"Looking for source user's personal space...")
+    src_space = get_personal_space(confluence, src_account_id, src_username, jira=jira)
+    if not src_space:
+        return False, f"No personal space found for {src_account_id}", 0
+    
+    src_key = src_space.get('key')
+    src_name = src_space.get('name', src_key)
+    print(f"Found source personal space: {src_name} ({src_key})")
+    
+    # Find or create destination space
+    print(f"Looking for destination user's personal space...")
+    dst_space = get_personal_space(confluence, dst_account_id, dst_username, jira=jira)
+    
+    if not dst_space:
+        print(f"Destination space not found, attempting to create...")
+        # Try to get display name for the space name
+        display_name = None
+        if jira:
+            try:
+                user = jira.user(dst_account_id)
+                display_name = user.displayName
+            except Exception:
+                pass
+        
+        success, result = create_personal_space(confluence, dst_account_id, display_name)
+        if not success:
+            return False, f"Could not create destination space: {result}", 0
+        dst_key = result
+        print(f"Created destination space: {dst_key}")
+    else:
+        dst_key = dst_space.get('key')
+        print(f"Found destination personal space: {dst_space.get('name', dst_key)} ({dst_key})")
+    
+    # Get all pages from source space using get_all_pages_from_space with proper pagination
+    all_pages = []
+    start = 0
+    limit = 50
+    
+    while True:
+        pages = confluence.get_all_pages_from_space(space=src_key, start=start, limit=limit, expand='ancestors')
+        print(f"  Fetched {len(pages) if pages else 0} pages at offset {start}")
+        if not pages:
+            break
+        all_pages.extend(pages)
+        start += limit
+        # Safety check - if we got fewer than limit, we're done
+        if len(pages) < limit:
+            break
+    
+    if not all_pages:
+        return True, "No pages found in source space", 0
+    
+    print(f"Found {len(all_pages)} total pages to move")
+    
+    # Build a map of old page IDs to track hierarchy
+    # Sort pages by ancestor count (parents first, then children)
+    def ancestor_count(page):
+        return len(page.get('ancestors', []))
+    
+    all_pages.sort(key=ancestor_count)
+    
+    # Track mapping from old page ID to new page ID for parent references
+    id_mapping = {}
+    
+    moved = 0
+    skipped = 0
+    failed = 0
+    
+    for page in all_pages:
+        page_id = page.get('id')
+        title = page.get('title')
+        ancestors = page.get('ancestors', [])
+        
+        # Find the immediate parent (last in ancestors list)
+        dst_parent_id = None
+        if ancestors:
+            old_parent_id = ancestors[-1].get('id')
+            # Check if parent was already moved
+            dst_parent_id = id_mapping.get(old_parent_id)
+        
+        if dry_run:
+            print(f"  Would move: {title}")
+            moved += 1
+            id_mapping[page_id] = page_id  # Fake mapping for dry run
+        else:
+            success, msg = move_page_to_space(confluence, page_id, dst_key, dst_parent_id)
+            if success:
+                if 'skipped' in msg:
+                    print(f"  Skipped (exists): {title}")
+                    skipped += 1
+                else:
+                    print(f"  Moved: {title}")
+                    moved += 1
+                # The page keeps its ID after move
+                id_mapping[page_id] = page_id
+            else:
+                print(f"  FAILED to move: {title} - {msg}")
+                failed += 1
+    
+    return True, f"Moved {moved} pages, skipped {skipped} (already exist), failed {failed}", moved
+
+
+def transfer_personal_space(config, confluence, src_account_id: str, dst_account_id: str,
+                            src_username: str = None, dst_username: str = None,
+                            jira=None, dry_run: bool = False) -> tuple:
+    """
+    Transfer ownership of all pages in src user's personal space to dst user,
+    then move the pages to the destination user's personal space.
+    Requires admin-key for restricted pages.
+    
+    Returns (success: bool, message: str, counts: tuple(edit, watch, owner, moved))
+    """
+    # Find source space
+    print(f"Looking for source user's personal space...")
+    src_space = get_personal_space(confluence, src_account_id, src_username, jira=jira)
+    if not src_space:
+        return False, f"No personal space found for {src_account_id}", (0, 0, 0, 0)
+    
+    src_key = src_space.get('key')
+    src_name = src_space.get('name', src_key)
+    print(f"Found personal space: {src_name} ({src_key})")
+    
+    # Process the space to transfer ownership
+    print(f"Transferring ownership from {src_account_id} to {dst_account_id}...")
+    edit_cnt, watch_cnt, owner_cnt = process_space(
+        config, confluence, src_key, src_account_id, dst_account_id,
+        limit=500, dry_run=dry_run
+    )
+    
+    # Always move pages to destination user's personal space
+    print(f"\nMoving pages to destination user's personal space...")
+    success, msg, moved_cnt = move_personal_space(
+        confluence, src_account_id, dst_account_id,
+        src_username=src_username, dst_username=dst_username,
+        jira=jira, dry_run=dry_run
+    )
+    print(f"Move result: {msg}")
+    
+    return True, f"Transferred {owner_cnt} page owners, {edit_cnt} edit perms, {watch_cnt} watchers, moved {moved_cnt} pages", (edit_cnt, watch_cnt, owner_cnt, moved_cnt)
+
+
 def copy_personal_space(confluence, src_account_id: str, dst_account_id: str, 
                         src_username: str = None, dst_username: str = None,
                         jira=None, dry_run: bool = False) -> tuple:

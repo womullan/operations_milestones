@@ -34,7 +34,8 @@ from opsMiles.ojira import (
 )
 from opsMiles.confluence import (
     process_space, get_confluence_client, copy_personal_space, update_space_ownership,
-    extract_page_id_from_url, get_page_owner, set_page_owner, add_user_to_update_restriction
+    extract_page_id_from_url, get_page_owner, set_page_owner, add_user_to_update_restriction,
+    transfer_personal_space, move_personal_space
 )
 
 
@@ -538,6 +539,8 @@ def main(argv=None):
     p.add_argument('--transferFilters', nargs=2, metavar=('SRC','DST'), help='Transfer all Jira filters owned by SRC to DST accountId')
     p.add_argument('--copyDashboards', nargs=2, metavar=('SRC','DST'), help='Copy all Jira dashboards from SRC to DST accountId')
     p.add_argument('--copyPersonalSpace', nargs=2, metavar=('SRC','DST'), help='Copy pages from SRC\'s Confluence personal space to DST\'s')
+    p.add_argument('--transferSpace', nargs=2, metavar=('SRC','DST'), help='Transfer ownership and move pages from SRC\'s personal space to DST (requires --admin-key)')
+    p.add_argument('--movePersonalSpace', nargs=2, metavar=('SRC','DST'), help='Move pages from SRC\'s personal space to DST\'s personal space (creates DST space if needed, does NOT transfer ownership)')
     p.add_argument('--updateSpaceOwnership', metavar='ACCOUNT_ID', help='Update ownership of all pages in user\'s personal space to that user')
     p.add_argument('--processConfluence', nargs=2, metavar=('SRC','DST'), help='Process Confluence spaces: transfer edit perms, watchers, and ownership from SRC to DST')
     p.add_argument('--srcUsername', help='Username for SRC personal space lookup (e.g., ykang)')
@@ -612,7 +615,7 @@ def main(argv=None):
             'confluence_edit': 0,
             'confluence_watch': 0,
             'confluence_owner': 0,
-            'personal_space_copied': 0,
+            'confluence_moved': 0,
         }
         
         copy_groups(config, src, dst, dry_run=dry_run)
@@ -624,19 +627,22 @@ def main(argv=None):
         summary['reviewer_changed'] = copy_reviewer(config, src, dst, dry_run, pred, getattr(args, 'reviewerField', 'Reviewer'))
         summary['reassigned'] = reassign(config, src, dst, dry_run, pred)
         confluence = get_confluence_client(config, admin_key=getattr(args, 'admin_key', False))
-        # Copy personal space
-        success, msg = copy_personal_space(
-            confluence, src, dst,
+        # Transfer personal space ownership and move pages
+        if not getattr(args, 'admin_key', False):
+            print("WARNING: Personal space transfer works best with --admin-key for restricted pages")
+        success, msg, ps_counts = transfer_personal_space(
+            config, confluence, src, dst,
             src_username=getattr(args, 'srcUsername', None),
             dst_username=getattr(args, 'dstUsername', None),
             jira=jira,
             dry_run=dry_run
         )
         print(f"Personal space: {msg}")
-        # Extract copied count from message if present (format: "Copied X pages, failed Y")
-        match = re.search(r'Copied (\d+) pages', msg)
-        if match:
-            summary['personal_space_copied'] = int(match.group(1))
+        # Add personal space counts to totals (edit, watch, owner, moved)
+        summary['confluence_edit'] += ps_counts[0]
+        summary['confluence_watch'] += ps_counts[1]
+        summary['confluence_owner'] += ps_counts[2]
+        summary['confluence_moved'] = ps_counts[3]
         
         if args.spaces:
             for s in args.spaces:
@@ -664,7 +670,7 @@ def main(argv=None):
         print(f"Confluence pages edit access: {summary['confluence_edit']}")
         print(f"Confluence pages watched:     {summary['confluence_watch']}")
         print(f"Confluence pages owner changed: {summary['confluence_owner']}")
-        print(f"Personal space pages copied:  {summary['personal_space_copied']}")
+        print(f"Confluence pages moved:       {summary['confluence_moved']}")
         print("=" * 50)
         
         ok = True
@@ -720,6 +726,37 @@ def main(argv=None):
         confluence = get_confluence_client(config, admin_key=getattr(args, 'admin_key', False))
         jira = get_jira_from_config(config)
         success, msg = copy_personal_space(
+            confluence, src, dst,
+            src_username=getattr(args, 'srcUsername', None),
+            dst_username=getattr(args, 'dstUsername', None),
+            jira=jira,
+            dry_run=getattr(args, 'dry_run', False)
+        )
+        print(msg)
+        ok = True
+
+    if getattr(args, 'transferSpace', None):
+        if not getattr(args, 'admin_key', False):
+            print("WARNING: --transferSpace requires --admin-key to work on restricted pages")
+            print("         Without admin-key, many pages may fail to transfer")
+        src, dst = args.transferSpace
+        confluence = get_confluence_client(config, admin_key=getattr(args, 'admin_key', False))
+        jira = get_jira_from_config(config)
+        success, msg, counts = transfer_personal_space(
+            config, confluence, src, dst,
+            src_username=getattr(args, 'srcUsername', None),
+            dst_username=getattr(args, 'dstUsername', None),
+            jira=jira,
+            dry_run=getattr(args, 'dry_run', False)
+        )
+        print(msg)
+        ok = True
+
+    if getattr(args, 'movePersonalSpace', None):
+        src, dst = args.movePersonalSpace
+        confluence = get_confluence_client(config, admin_key=getattr(args, 'admin_key', False))
+        jira = get_jira_from_config(config)
+        success, msg, moved = move_personal_space(
             confluence, src, dst,
             src_username=getattr(args, 'srcUsername', None),
             dst_username=getattr(args, 'dstUsername', None),
