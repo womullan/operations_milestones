@@ -25,18 +25,22 @@ def get_confluence_client(config: dict, admin_key: bool = False) -> Confluence:
     If admin_key=True, adds the Atl-Confluence-With-Admin-Key header to bypass
     page restrictions (requires Confluence Cloud Premium/Enterprise and site admin).
     """
+    import requests
+    
     url = config.get("url")
     username = config.get("user")
     password = config.get("password")
-    # atlassian.Confluence accepts cloud if using Atlassian Cloud; leave defaults.
-    confluence = Confluence(url=url, username=username, password=password)
     
     if admin_key:
-        # Add admin key header to bypass page restrictions
-        confluence._session.headers.update({
+        # Create session with admin key header
+        session = requests.Session()
+        session.headers.update({
             'Atl-Confluence-With-Admin-Key': 'true'
         })
         print("Admin key mode enabled - bypassing page restrictions")
+        confluence = Confluence(url=url, username=username, password=password, session=session)
+    else:
+        confluence = Confluence(url=url, username=username, password=password)
     
     return confluence
 
