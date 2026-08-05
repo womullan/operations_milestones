@@ -18,12 +18,12 @@ import sys
 from urllib.parse import quote
 from atlassian import Confluence
 
-def get_confluence_client(config: dict, admin_key: bool = False) -> Confluence:
+def get_confluence_client(config: dict) -> Confluence:
     """Create a Confluence client from login config dict.
     config keys expected: url, user, password
     
-    If admin_key=True, adds the Atl-Confluence-With-Admin-Key header to bypass
-    page restrictions (requires Confluence Cloud Premium/Enterprise and site admin).
+    Always adds the Atl-Confluence-With-Admin-Key header to bypass page restrictions
+    (requires Confluence Cloud Premium/Enterprise and site admin).
     """
     import requests
     
@@ -31,16 +31,12 @@ def get_confluence_client(config: dict, admin_key: bool = False) -> Confluence:
     username = config.get("user")
     password = config.get("password")
     
-    if admin_key:
-        # Create session with admin key header
-        session = requests.Session()
-        session.headers.update({
-            'Atl-Confluence-With-Admin-Key': 'true'
-        })
-        print("Admin key mode enabled - bypassing page restrictions")
-        confluence = Confluence(url=url, username=username, password=password, session=session)
-    else:
-        confluence = Confluence(url=url, username=username, password=password)
+    # Create session with admin key header
+    session = requests.Session()
+    session.headers.update({
+        'Atl-Confluence-With-Admin-Key': 'true'
+    })
+    confluence = Confluence(url=url, username=username, password=password, session=session)
     
     return confluence
 
@@ -57,7 +53,8 @@ def _paginate_cql(confluence: Confluence, cql: str):
         for item in results:
             yield item
         start += limit
-        if start >= r.get("size", 0):
+        # Use totalSize (total matching results) not size (current batch size)
+        if start >= r.get("totalSize", 0):
             break
 
 
@@ -447,95 +444,204 @@ def process_space(
     limit=50,
     dry_run=False,
 ):
-    """Process a Confluence space to transfer edit permissions, watchers, and ownership.
+    """Process a Confluence space to transfer edit permissions, watchers, ownership, and mentions.
     
-    Returns tuple (edit_count, watch_count, owner_count) with number of pages modified.
+    Returns tuple (edit_count, watch_count, owner_count, page_count, mention_count) with number of pages modified.
     """
-    start = 0
     count = 0
     wcount = 0
     ocount = 0
     pcount = 0
-    while True:
-        pages = confluence.get_all_pages_from_space(
-            space=space_key,
-            start=start,
-            limit=limit,
-            expand="history,version",
+    mcount = 0
+    
+    # Use CQL to get ALL pages in space (more reliable than get_all_pages_from_space)
+    cql = f'space = "{space_key}" AND type = page'
+    
+    for item in _paginate_cql(confluence, cql):
+        # CQL results have page data inside 'content' wrapper
+        content = item.get("content", item)
+        page_id = content.get("id")
+        title = item.get("title") or content.get("title", f"Page {page_id}")
+        if not page_id:
+            continue
+        pcount += 1
+        if (pcount % 100) == 0:
+            print(f"Checked {pcount} pages")
+
+        # Process each page using the shared function
+        page_counts = process_single_page(
+            config, confluence, page_id, old_account_id, new_account_id,
+            dry_run=dry_run, title=title, verbose=False
         )
+        count += page_counts['edit']
+        wcount += page_counts['watch']
+        ocount += page_counts['owner']
+        mcount += page_counts['mention']
 
-        if not pages:
-            break
-        url = f'{config.get("url")}/wiki/'
-        for page in pages:
-            pcount += 1
-            page_id = page["id"]
-            title = page["title"]
-            if (pcount % 100) == 0:
-                print (f"Checked {pcount} pages")
+    print(f"Allowed edit on {count}, watch {wcount}, changed owner {ocount}, mentions replaced {mcount} (checked {pcount} pages)")
+    return count, wcount, ocount, pcount, mcount
 
-            # Check ownership first
-            owner_id = ""
+
+def process_spaces(
+    config,
+    confluence,
+    space_keys,
+    old_account_id,
+    new_account_id,
+    limit=500,
+    dry_run=False,
+):
+    """Process multiple Confluence spaces to transfer edit permissions, watchers, ownership, and mentions.
+    
+    If space_keys is None or empty, processes all spaces.
+    
+    Returns dict with totals: {edit, watch, owner, pages, mentions}.
+    """
+    total_edit = 0
+    total_watch = 0
+    total_owner = 0
+    total_pages = 0
+    total_mentions = 0
+    
+    if space_keys:
+        for s in space_keys:
+            print(f"\nProcessing space: {s}")
+            edit_cnt, watch_cnt, owner_cnt, page_cnt, mention_cnt = process_space(
+                config, confluence, s, old_account_id, new_account_id,
+                limit=limit, dry_run=dry_run
+            )
+            total_edit += edit_cnt
+            total_watch += watch_cnt
+            total_owner += owner_cnt
+            total_pages += page_cnt
+            total_mentions += mention_cnt
+    else:
+        print("Processing all spaces (this may take a long time)...")
+        for space in list_spaces(confluence):
+            space_key = space.get("key")
+            print(f"\nProcessing space: {space_key}")
+            edit_cnt, watch_cnt, owner_cnt, page_cnt, mention_cnt = process_space(
+                config, confluence, space_key, old_account_id, new_account_id,
+                limit=limit, dry_run=dry_run
+            )
+            total_edit += edit_cnt
+            total_watch += watch_cnt
+            total_owner += owner_cnt
+            total_pages += page_cnt
+            total_mentions += mention_cnt
+    
+    print("\n" + "=" * 50)
+    print("CONFLUENCE PROCESSING SUMMARY")
+    print("=" * 50)
+    print(f"Total pages checked:            {total_pages}")
+    print(f"Pages with edit access granted: {total_edit}")
+    print(f"Pages with watcher added:       {total_watch}")
+    print(f"Pages with owner changed:       {total_owner}")
+    print(f"Pages with mentions replaced:   {total_mentions}")
+    print("=" * 50)
+    
+    return {
+        'edit': total_edit,
+        'watch': total_watch,
+        'owner': total_owner,
+        'pages': total_pages,
+        'mentions': total_mentions,
+    }
+
+
+def process_single_page(
+    config,
+    confluence,
+    page_id,
+    old_account_id,
+    new_account_id,
+    dry_run=False,
+    title=None,
+    verbose=True,
+):
+    """Process a single Confluence page to transfer edit permissions, watchers, ownership, and mentions.
+    
+    Returns dict with counts: {edit: 0/1, watch: 0/1, owner: 0/1, mention: 0/1}.
+    """
+    base_url = config.get("url")
+    url = f'{base_url}/wiki/'
+    page_url = f"{base_url}/wiki/pages/{page_id}"
+    
+    counts = {'edit': 0, 'watch': 0, 'owner': 0, 'mention': 0}
+    
+    if verbose:
+        print(f"Processing page: {title or page_id}")
+    
+    # Get page owner
+    owner_id = ""
+    try:
+        owner_id = get_page_owner(confluence, page_id)
+        if verbose:
+            print(f"  Current owner: {owner_id}")
+    except Exception as e:
+        print(f"  FAILED to get owner: {title or page_id}\n    Page: {page_url}\n    Error: {e}")
+    
+    if owner_id == old_account_id:
+        # Old user owns the page - grant edit and change owner
+        if not dry_run:
             try:
-                owner_id = get_page_owner(confluence, page_id)
+                add_user_to_update_restriction(confluence, url, page_id, new_account_id, dry_run=False)
+                counts['edit'] = 1
             except Exception as e:
-                print(f"  FAILED to get owner: {title} - {e}")
-
-            if owner_id == old_account_id:
-                # Old user owns the page - no need to check edit, just grant and change owner
-                if not dry_run:
-                    try:
-                        add_user_to_update_restriction(confluence, url, page_id, new_account_id, dry_run=False)
-                    except Exception as e:
-                        print(f"  FAILED to add editor: {title} - {e}")
-                
-                if dry_run:
-                    print(f"  Would change owner: {title}")
-                    ocount += 1
-                else:
-                    try:
-                        success, msg = set_page_owner(confluence, page_id, new_account_id)
-                        if success and msg != "skipped":
-                            print(f"  Changed owner: {title}")
-                            ocount += 1
-                        elif not success:
-                            print(f"  FAILED to change owner: {title} - {msg}")
-                    except Exception as e:
-                        print(f"  FAILED to change owner: {title} - {e}")
-            else:
-                # Old user doesn't own - use normal allow_edit check
-                try:
-                    ok = allow_edit(
-                        confluence=confluence,
-                        url=url,
-                        page_id=page_id,
-                        title=title,
-                        old_accountid=old_account_id,
-                        new_accountid=new_account_id,
-                        dry_run=dry_run,
-                    )
-                    if ok:
-                        count += 1
-                except Exception as e:
-                    print(f"  FAILED to add editor: {e}")
-
-            # Transfer watcher
-            if page_has_watcher(confluence, page_id, old_account_id):
-                try:
-                    print(f"Trying to watch : {title} (id={page_id})")
-                    add_watcher(
-                        confluence,
-                        page_id,
-                        new_account_id,
-                        dry_run=dry_run,
-                    )
-                    wcount += 1
-                except Exception as e:
-                    print(f"  FAILED to add watcher: {e}")
-
-        start += limit
-    print (f"Allowed edit on {count}, watch {wcount}, changed owner {ocount}")
-    return count, wcount, ocount
+                print(f"  FAILED to add editor: {title or page_id}\n    Page: {page_url}\n    Error: {e}")
+        
+        if dry_run:
+            if verbose:
+                print(f"  Would change owner: {title or page_id}")
+            counts['owner'] = 1
+        else:
+            try:
+                success, msg = set_page_owner(confluence, page_id, new_account_id)
+                if success and msg != "skipped":
+                    if verbose:
+                        print(f"  Changed owner: {title or page_id}")
+                    counts['owner'] = 1
+                elif not success:
+                    print(f"  FAILED to change owner: {title or page_id}\n    Page: {page_url}\n    Error: {msg}")
+            except Exception as e:
+                print(f"  FAILED to change owner: {title or page_id}\n    Page: {page_url}\n    Error: {e}")
+    else:
+        # Old user doesn't own - use normal allow_edit check
+        try:
+            ok = allow_edit(
+                confluence=confluence,
+                url=url,
+                page_id=page_id,
+                title=title or str(page_id),
+                old_accountid=old_account_id,
+                new_accountid=new_account_id,
+                dry_run=dry_run,
+            )
+            if ok:
+                counts['edit'] = 1
+        except Exception as e:
+            print(f"  FAILED to add editor: {title or page_id}\n    Page: {page_url}\n    Error: {e}")
+    
+    # Transfer watcher
+    if page_has_watcher(confluence, page_id, old_account_id):
+        try:
+            if verbose:
+                print(f"  Trying to watch: {title or page_id} (id={page_id})")
+            add_watcher(
+                confluence,
+                page_id,
+                new_account_id,
+                dry_run=dry_run,
+            )
+            counts['watch'] = 1
+        except Exception as e:
+            print(f"  FAILED to add watcher: {title or page_id}\n    Page: {page_url}\n    Error: {e}")
+    
+    # Replace user mentions
+    if replace_user_in_page(confluence, page_id, old_account_id, new_account_id, dry_run=dry_run):
+        counts['mention'] = 1
+    
+    return counts
 
 
 def list_spaces(confluence, limit=50):
@@ -555,6 +661,139 @@ def list_spaces(confluence, limit=50):
             yield space
 
         start += limit
+
+
+def replace_user_in_page(confluence, page_id, src_id, dst_id, dry_run=False):
+    """
+    Replace user mentions in a single page.
+    Replaces ri:account-id="src_id" with ri:account-id="dst_id".
+    
+    Returns True if the page was modified, False otherwise.
+    """
+    import re
+    
+    search_pattern = f'ri:account-id="{src_id}"'
+    replace_pattern = f'ri:account-id="{dst_id}"'
+    
+    try:
+        page = confluence.get_page_by_id(page_id, expand='body.storage,version')
+        body = page.get('body', {}).get('storage', {}).get('value', '')
+        title = page.get('title', 'Unknown')
+        
+        if search_pattern not in body:
+            return False
+        
+        print(f"  Found user mention in: {title}")
+        
+        if dry_run:
+            return True
+        
+        new_body = body.replace(search_pattern, replace_pattern)
+        try:
+            confluence.update_page(page_id, title, new_body, representation='storage')
+            print(f"    Updated!")
+            return True
+        except Exception as e:
+            print(f"    FAILED to update: {e}")
+            return False
+            
+    except Exception as e:
+        print(f"  FAILED to read page {page_id}: {e}")
+        return False
+
+
+def replace_user_in_space(confluence, space_key, src_id, dst_id, dry_run=False, confirm=False):
+    """
+    Replace user mentions in all pages of a space.
+    
+    Returns list of page IDs that were modified.
+    """
+    cql = f'space = "{space_key}" AND type = page'
+    modified = []
+    page_count = 0
+    confirm_all = not confirm  # If confirm is False, apply to all
+    
+    print(f"  Scanning space: {space_key}")
+    
+    for item in _paginate_cql(confluence, cql):
+        content = item.get("content", item)
+        page_id = content.get("id")
+        if not page_id:
+            continue
+        
+        page_count += 1
+        if page_count % 100 == 0:
+            print(f"  Checked {page_count} pages...")
+        
+        # Check if page contains the search pattern before full processing
+        page = confluence.get_page_by_id(page_id, expand='body.storage')
+        body = page.get('body', {}).get('storage', {}).get('value', '')
+        search_pattern = f'ri:account-id="{src_id}"'
+        
+        if search_pattern not in body:
+            continue
+        
+        title = page.get('title', 'Unknown')
+        print(f"  Found user mention in: {title}")
+        
+        if not confirm_all:
+            resp = input(f"    Replace in this page? [y/n/a(ll)]: ").strip().lower()
+            if resp == 'n':
+                continue
+            if resp == 'a':
+                confirm_all = True
+        
+        if replace_user_in_page(confluence, page_id, src_id, dst_id, dry_run=dry_run):
+            modified.append(page_id)
+    
+    print(f"  Scanned {page_count} pages total")
+    return modified
+
+
+def list_pages_in_space(confluence, space_key, debug=False):
+    """
+    List all pages in a space using CQL.
+    Returns list of dicts with id, title, and url info.
+    """
+    cql = f'space = "{space_key}" AND type = page ORDER BY title'
+    if debug:
+        print(f"  CQL: {cql}")
+    
+    # First, check what the raw CQL returns
+    raw = confluence.cql(cql, start=0, limit=5)
+    if debug:
+        print(f"  Raw CQL result keys: {raw.keys()}")
+        print(f"  Total size: {raw.get('totalSize', 'N/A')}")
+        if raw.get("results"):
+            print(f"  First result keys: {raw['results'][0].keys()}")
+    
+    pages = []
+    for item in _paginate_cql(confluence, cql):
+        # CQL results have page data inside 'content' wrapper
+        content = item.get("content", item)
+        page_id = content.get("id")
+        title = item.get("title") or content.get("title", "Unknown")
+        if page_id:
+            pages.append({
+                "id": page_id,
+                "title": title,
+            })
+    return pages
+
+
+def print_space_pages(confluence, space_key, base_url, debug=False):
+    """
+    List and print all pages in a space.
+    """
+    print(f"\nListing pages in space: {space_key}")
+    pages = list_pages_in_space(confluence, space_key, debug=debug)
+    print(f"Found {len(pages)} pages:\n")
+    for page in pages:
+        page_url = f"{base_url}/wiki/pages/{page['id']}"
+        print(f"  {page['title']}")
+        print(f"    {page_url}")
+    return pages
+
 
 def page_is_favourited(confluence, base_url, account_id, page_id):
     """
@@ -994,7 +1233,6 @@ def transfer_personal_space(config, confluence, src_account_id: str, dst_account
     """
     Transfer ownership of all pages in src user's personal space to dst user,
     then move the pages to the destination user's personal space.
-    Requires admin-key for restricted pages.
     
     Returns (success: bool, message: str, counts: tuple(edit, watch, owner, moved))
     """
@@ -1010,7 +1248,7 @@ def transfer_personal_space(config, confluence, src_account_id: str, dst_account
     
     # Process the space to transfer ownership
     print(f"Transferring ownership from {src_account_id} to {dst_account_id}...")
-    edit_cnt, watch_cnt, owner_cnt = process_space(
+    edit_cnt, watch_cnt, owner_cnt, page_cnt, mention_cnt = process_space(
         config, confluence, src_key, src_account_id, dst_account_id,
         limit=500, dry_run=dry_run
     )

@@ -657,27 +657,98 @@ def reassign(config: dict, src: str, dst: str, dry_run: bool, pred: str) -> int:
 # ============================================================================
 
 def get_user_filters(jira: JIRA, account_id: str) -> list:
-    """Get all filters owned by an account."""
+    """Get all filters owned by an account.
+    
+    Filters results to only include filters actually owned by the account,
+    since the API may also return filters the user has access to.
+    """
     url = f'{jira.server_url}/rest/api/3/filter/search'
-    params = {'accountId': account_id, 'maxResults': 100}
+    params = {'accountId': account_id, 'maxResults': 100, 'expand': 'owner'}
     r = jira._session.get(url, params=params)
     if r.status_code == 200:
-        return r.json().get('values', [])
+        filters = r.json().get('values', [])
+        # Filter to only include filters actually owned by this account
+        owned = [f for f in filters if f.get('owner', {}).get('accountId') == account_id]
+        return owned
     return []
 
 
 def share_filter(jira: JIRA, filter_id: int, account_id: str) -> tuple:
-    """Grant view permission on a filter to a user.
+    """Grant edit permission on a filter to a user and change ownership.
     
     Returns (success: bool, error_msg: str or None)
+    If the filter is already shared with 'loggedin' or 'global', skips sharing but still tries to change owner.
     """
     from jira import JIRAError
     
+    messages = []
+    
+    # First try to change ownership
+    owner_success, owner_err = change_filter_owner(jira, filter_id, account_id)
+    if owner_success:
+        messages.append("owner changed")
+    else:
+        messages.append(f"owner change failed: {owner_err}")
+    
+    # Then grant edit permission
     url = f'{jira.server_url}/rest/api/3/filter/{filter_id}/permission'
-    payload = {'type': 'user', 'accountId': account_id}
+    
+    # Check existing permissions first
+    skip_share = False
     try:
-        r = jira._session.post(url, json=payload)
-        if r.status_code in (200, 201):
+        r = jira._session.get(url)
+        if r.status_code == 200:
+            perms = r.json()
+            for p in perms:
+                ptype = p.get('type', '')
+                # If already shared with all logged-in users or globally, user already has access
+                if ptype in ('loggedin', 'global'):
+                    messages.append(f"already shared with {ptype}")
+                    skip_share = True
+                    break
+                # If already shared with this specific user, skip
+                if ptype == 'user' and p.get('user', {}).get('accountId') == account_id:
+                    messages.append("already shared with user")
+                    skip_share = True
+                    break
+    except Exception:
+        pass  # Continue to try adding permission anyway
+    
+    if not skip_share:
+        payload = {'type': 'user', 'accountId': account_id, 'rights': 'EDIT'}
+        try:
+            r = jira._session.post(url, json=payload)
+            if r.status_code in (200, 201):
+                messages.append("edit permission granted")
+            else:
+                try:
+                    err = r.json().get('errorMessages', [r.text])
+                    err_msg = '; '.join(err) if isinstance(err, list) else str(err)
+                except Exception:
+                    err_msg = r.text
+                messages.append(f"share failed: {err_msg}")
+        except JIRAError as e:
+            messages.append(f"share failed: {e.text}")
+        except Exception as e:
+            messages.append(f"share failed: {str(e)}")
+    
+    # Success if owner was changed (most important)
+    return owner_success, "; ".join(messages)
+
+
+def change_filter_owner(jira: JIRA, filter_id: int, new_owner_account_id: str) -> tuple:
+    """Change the owner of a filter.
+    
+    Returns (success: bool, error_msg: str or None)
+    Note: Requires being a Jira admin or the current filter owner.
+    """
+    from jira import JIRAError
+    
+    url = f'{jira.server_url}/rest/api/3/filter/{filter_id}/owner'
+    payload = {'accountId': new_owner_account_id}
+    try:
+        r = jira._session.put(url, json=payload)
+        if r.status_code in (200, 204):
             return True, None
         try:
             err = r.json().get('errorMessages', [r.text])
@@ -692,26 +763,26 @@ def share_filter(jira: JIRA, filter_id: int, account_id: str) -> tuple:
 
 
 def share_all_filters(jira: JIRA, src: str, dst: str, dry_run: bool = False) -> int:
-    """Share all filters owned by src user with dst user."""
+    """Transfer all filters owned by src user to dst user (changes owner and grants edit)."""
     filters = get_user_filters(jira, src)
-    shared = 0
+    transferred = 0
     failed = 0
     print(f"Found {len(filters)} filters owned by {src}")
     for f in filters:
         fid = f['id']
         fname = f['name']
         if dry_run:
-            print(f"  Would share filter {fid}: {fname}")
+            print(f"  Would transfer filter {fid}: {fname}")
         else:
-            success, err = share_filter(jira, fid, dst)
+            success, msg = share_filter(jira, fid, dst)
             if success:
-                print(f"  Shared filter {fid}: {fname}")
-                shared += 1
+                print(f"  Transferred filter {fid}: {fname} ({msg})")
+                transferred += 1
             else:
-                print(f"  FAILED filter {fid}: {fname} - {err}")
+                print(f"  FAILED filter {fid}: {fname} - {msg}")
                 failed += 1
-    print(f"Filters: shared={shared} failed={failed}")
-    return shared
+    print(f"Filters: total={len(filters)} transferred={transferred} failed={failed}")
+    return transferred
 
 
 # ============================================================================
@@ -719,57 +790,88 @@ def share_all_filters(jira: JIRA, src: str, dst: str, dry_run: bool = False) -> 
 # ============================================================================
 
 def get_user_dashboards(jira: JIRA, account_id: str) -> list:
-    """Get all dashboards owned by an account."""
+    """Get all dashboards owned by an account.
+    
+    Filters results to only include dashboards actually owned by the account.
+    """
     url = f'{jira.server_url}/rest/api/3/dashboard/search'
     params = {'accountId': account_id, 'maxResults': 100}
     r = jira._session.get(url, params=params)
     if r.status_code == 200:
-        return r.json().get('values', [])
+        dashboards = r.json().get('values', [])
+        return dashboards
     return []
 
 
-def copy_dashboard(jira: JIRA, dashboard_id: str, new_owner_id: str, new_name: str = None) -> tuple:
-    """Copy a dashboard and set the owner to the new user.
+def change_dashboard_owner(jira: JIRA, dashboard_id: str, new_owner_id: str) -> tuple:
+    """Change the owner of a dashboard.
     
-    Returns (success: bool, new_dashboard_id or error_msg)
+    Returns (success: bool, error_msg: str or None)
     """
-    copy_url = f'{jira.server_url}/rest/api/3/dashboard/{dashboard_id}/copy'
-    copy_payload = {}
-    if new_name:
-        copy_payload['name'] = new_name
+    url = f'{jira.server_url}/rest/api/3/dashboard/bulk/edit'
+    payload = {
+        'action': 'changeOwner',
+        'entityIds': [int(dashboard_id)],
+        'newOwner': new_owner_id,
+        'extendAdminPermissions': True
+    }
     
     try:
-        r = jira._session.post(copy_url, json=copy_payload)
-        if r.status_code not in (200, 201):
-            return False, f"Copy failed: HTTP {r.status_code} - {r.text[:200]}"
-        
-        new_dashboard = r.json()
-        new_dashboard_id = new_dashboard.get('id')
-        
-        edit_url = f'{jira.server_url}/rest/api/3/dashboard/bulk/edit'
-        edit_payload = {
-            'action': 'changeOwner',
-            'entityIds': [int(new_dashboard_id)],
-            'newOwner': new_owner_id,
-            'extendAdminPermissions': True
-        }
-        
-        r2 = jira._session.put(edit_url, json=edit_payload)
-        if r2.status_code not in (200, 204):
-            return True, f"{new_dashboard_id} (warning: owner change failed: {r2.text[:100]})"
-        
-        return True, new_dashboard_id
+        r = jira._session.put(url, json=payload)
+        if r.status_code in (200, 204):
+            return True, None
+        try:
+            err = r.json().get('errorMessages', [r.text])
+            err_msg = '; '.join(err) if isinstance(err, list) else str(err)
+        except Exception:
+            err_msg = r.text
+        return False, err_msg
     except Exception as e:
         return False, str(e)
 
 
-def copy_user_dashboards(jira: JIRA, src_account: str, dst_account: str, dry_run: bool = False) -> tuple:
-    """Copy all dashboards from src user to dst user.
+def transfer_dashboard(jira: JIRA, dashboard_id: str, new_owner_id: str) -> tuple:
+    """Transfer a dashboard to a new owner and grant edit permission.
     
-    Returns (copied_count, failed_count)
+    Returns (success: bool, message: str)
+    """
+    messages = []
+    
+    # Change ownership
+    owner_success, owner_err = change_dashboard_owner(jira, dashboard_id, new_owner_id)
+    if owner_success:
+        messages.append("owner changed")
+    else:
+        messages.append(f"owner change failed: {owner_err}")
+    
+    # Grant edit permission
+    url = f'{jira.server_url}/rest/api/3/dashboard/{dashboard_id}/permission'
+    payload = {
+        'type': 'user',
+        'user': {'accountId': new_owner_id},
+        'rights': 'EDIT'
+    }
+    try:
+        r = jira._session.post(url, json=payload)
+        if r.status_code in (200, 201):
+            messages.append("edit permission granted")
+        elif r.status_code == 400 and 'already' in r.text.lower():
+            messages.append("already has permission")
+        else:
+            messages.append(f"permission grant failed: {r.text[:100]}")
+    except Exception as e:
+        messages.append(f"permission grant failed: {str(e)}")
+    
+    return owner_success, "; ".join(messages)
+
+
+def transfer_user_dashboards(jira: JIRA, src_account: str, dst_account: str, dry_run: bool = False) -> tuple:
+    """Transfer all dashboards from src user to dst user (changes owner and grants edit).
+    
+    Returns (transferred_count, failed_count)
     """
     dashboards = get_user_dashboards(jira, src_account)
-    copied = 0
+    transferred = 0
     failed = 0
     print(f"Found {len(dashboards)} dashboards owned by {src_account}")
     
@@ -778,19 +880,19 @@ def copy_user_dashboards(jira: JIRA, src_account: str, dst_account: str, dry_run
         dash_name = dash.get('name', 'Unknown')
         
         if dry_run:
-            print(f"  Would copy dashboard {dash_id}: {dash_name}")
-            copied += 1
+            print(f"  Would transfer dashboard {dash_id}: {dash_name}")
+            transferred += 1
         else:
-            success, result = copy_dashboard(jira, dash_id, dst_account)
+            success, msg = transfer_dashboard(jira, dash_id, dst_account)
             if success:
-                print(f"  Copied dashboard {dash_id}: {dash_name} -> new id: {result}")
-                copied += 1
+                print(f"  Transferred dashboard {dash_id}: {dash_name} ({msg})")
+                transferred += 1
             else:
-                print(f"  FAILED dashboard {dash_id}: {dash_name} - {result}")
+                print(f"  FAILED dashboard {dash_id}: {dash_name} - {msg}")
                 failed += 1
     
-    print(f"Dashboards: copied={copied} failed={failed}")
-    return copied, failed
+    print(f"Dashboards: total={len(dashboards)} transferred={transferred} failed={failed}")
+    return transferred, failed
 
 
 if __name__ == '__main__':

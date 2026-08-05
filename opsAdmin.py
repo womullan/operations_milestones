@@ -29,13 +29,14 @@ from opsMiles.ojira import (
     add_watcher, copy_watcher, assign_issue_quiet,
     change_reporter_quiet, copy_reporter, copy_reviewer, reassign,
     get_user_filters, share_filter, share_all_filters,
-    get_user_dashboards, copy_dashboard, copy_user_dashboards,
+    get_user_dashboards, transfer_dashboard, transfer_user_dashboards,
     list_user_fields
 )
 from opsMiles.confluence import (
-    process_space, get_confluence_client, copy_personal_space, update_space_ownership,
+    process_space, process_spaces, process_single_page, get_confluence_client, update_space_ownership,
     extract_page_id_from_url, get_page_owner, set_page_owner, add_user_to_update_restriction,
-    transfer_personal_space, move_personal_space
+    transfer_personal_space, list_spaces, list_pages_in_space, replace_pages, update_single_page,
+    replace_user_in_page, replace_user_in_space, print_space_pages, get_personal_space
 )
 
 
@@ -347,142 +348,6 @@ def assign_issue_quiet(jira: JIRA, issue_key: str, account_id: str) -> bool:
     return r.status_code == 204
 
 
-def get_user_filters(jira: JIRA, account_id: str) -> list:
-    """Get all filters owned by an account."""
-    url = f'{jira.server_url}/rest/api/3/filter/search'
-    params = {'accountId': account_id, 'maxResults': 100}
-    r = jira._session.get(url, params=params)
-    if r.status_code == 200:
-        return r.json().get('values', [])
-    return []
-
-
-def share_filter(jira: JIRA, filter_id: int, account_id: str) -> tuple:
-    """Grant view permission on a filter to a user.
-    
-    Returns (success: bool, error_msg: str or None)
-    """
-    url = f'{jira.server_url}/rest/api/3/filter/{filter_id}/permission'
-    payload = {
-        'type': 'user',
-        'accountId': account_id
-    }
-    try:
-        r = jira._session.post(url, json=payload)
-        if r.status_code in (200, 201):
-            return True, None
-        try:
-            err = r.json().get('errorMessages', [r.text])
-            err_msg = '; '.join(err) if isinstance(err, list) else str(err)
-        except Exception:
-            err_msg = r.text
-        return False, err_msg
-    except JIRAError as e:
-        return False, e.text
-    except Exception as e:
-        return False, str(e)
-
-
-def share_all_filters(jira: JIRA, src: str, dst: str, dry_run: bool = False) -> int:
-    """Share all filters owned by src user with dst user (grants edit permission)."""
-    filters = get_user_filters(jira, src)
-    shared = 0
-    failed = 0
-    print(f"Found {len(filters)} filters owned by {src}")
-    for f in filters:
-        fid = f['id']
-        fname = f['name']
-        if dry_run:
-            print(f"  Would share filter {fid}: {fname}")
-        else:
-            success, err = share_filter(jira, fid, dst)
-            if success:
-                print(f"  Shared filter {fid}: {fname}")
-                shared += 1
-            else:
-                print(f"  FAILED filter {fid}: {fname} - {err}")
-                failed += 1
-    print(f"Filters: shared={shared} failed={failed}")
-    return shared
-
-
-def get_user_dashboards(jira: JIRA, account_id: str) -> list:
-    """Get all dashboards owned by an account."""
-    url = f'{jira.server_url}/rest/api/3/dashboard/search'
-    params = {'accountId': account_id, 'maxResults': 100}
-    r = jira._session.get(url, params=params)
-    if r.status_code == 200:
-        return r.json().get('values', [])
-    return []
-
-
-def copy_dashboard(jira: JIRA, dashboard_id: str, new_owner_id: str, new_name: str = None) -> tuple:
-    """Copy a dashboard and set the owner to the new user.
-    
-    Returns (success: bool, new_dashboard_id or error_msg)
-    """
-    # First copy the dashboard
-    copy_url = f'{jira.server_url}/rest/api/3/dashboard/{dashboard_id}/copy'
-    copy_payload = {}
-    if new_name:
-        copy_payload['name'] = new_name
-    
-    try:
-        r = jira._session.post(copy_url, json=copy_payload)
-        if r.status_code not in (200, 201):
-            return False, f"Copy failed: HTTP {r.status_code} - {r.text[:200]}"
-        
-        new_dashboard = r.json()
-        new_dashboard_id = new_dashboard.get('id')
-        
-        # Now change the owner using bulk edit
-        edit_url = f'{jira.server_url}/rest/api/3/dashboard/bulk/edit'
-        edit_payload = {
-            'action': 'changeOwner',
-            'entityIds': [int(new_dashboard_id)],
-            'newOwner': new_owner_id,
-            'extendAdminPermissions': True
-        }
-        
-        r2 = jira._session.put(edit_url, json=edit_payload)
-        if r2.status_code not in (200, 204):
-            return True, f"{new_dashboard_id} (warning: owner change failed: {r2.text[:100]})"
-        
-        return True, new_dashboard_id
-    except Exception as e:
-        return False, str(e)
-
-
-def copy_user_dashboards(jira: JIRA, src_account: str, dst_account: str, dry_run: bool = False) -> tuple:
-    """Copy all dashboards from src user to dst user.
-    
-    Returns (copied_count, failed_count)
-    """
-    dashboards = get_user_dashboards(jira, src_account)
-    copied = 0
-    failed = 0
-    print(f"Found {len(dashboards)} dashboards owned by {src_account}")
-    
-    for dash in dashboards:
-        dash_id = dash.get('id')
-        dash_name = dash.get('name', 'Unknown')
-        
-        if dry_run:
-            print(f"  Would copy dashboard {dash_id}: {dash_name}")
-            copied += 1
-        else:
-            success, result = copy_dashboard(jira, dash_id, dst_account)
-            if success:
-                print(f"  Copied dashboard {dash_id}: {dash_name} -> new id: {result}")
-                copied += 1
-            else:
-                print(f"  FAILED dashboard {dash_id}: {dash_name} - {result}")
-                failed += 1
-    
-    print(f"Dashboards: copied={copied} failed={failed}")
-    return copied, failed
-
-
 def reassign(config:dict, src:str, dst:str, dry_run:bool, pred:str) -> int:
     """Reassign tickets from accoutn id src to accountid dst - return the count"""
     jira = get_jira_from_config(config)
@@ -537,10 +402,8 @@ def main(argv=None):
     p.add_argument('--reviewerField', default='Reviewer', help='Name of the reviewer field in Jira (default: Reviewer)')
     p.add_argument('--listUserFields', action='store_true', help='List all user-type fields in Jira')
     p.add_argument('--transferFilters', nargs=2, metavar=('SRC','DST'), help='Transfer all Jira filters owned by SRC to DST accountId')
-    p.add_argument('--copyDashboards', nargs=2, metavar=('SRC','DST'), help='Copy all Jira dashboards from SRC to DST accountId')
-    p.add_argument('--copyPersonalSpace', nargs=2, metavar=('SRC','DST'), help='Copy pages from SRC\'s Confluence personal space to DST\'s')
-    p.add_argument('--transferSpace', nargs=2, metavar=('SRC','DST'), help='Transfer ownership and move pages from SRC\'s personal space to DST (requires --admin-key)')
-    p.add_argument('--movePersonalSpace', nargs=2, metavar=('SRC','DST'), help='Move pages from SRC\'s personal space to DST\'s personal space (creates DST space if needed, does NOT transfer ownership)')
+    p.add_argument('--transferDashboards', nargs=2, metavar=('SRC','DST'), help='Transfer all Jira dashboards from SRC to DST accountId')
+    p.add_argument('--transferSpace', nargs=2, metavar=('SRC','DST'), help='Transfer ownership and move pages from SRC\'s personal space to DST')
     p.add_argument('--updateSpaceOwnership', metavar='ACCOUNT_ID', help='Update ownership of all pages in user\'s personal space to that user')
     p.add_argument('--processConfluence', nargs=2, metavar=('SRC','DST'), help='Process Confluence spaces: transfer edit perms, watchers, and ownership from SRC to DST')
     p.add_argument('--srcUsername', help='Username for SRC personal space lookup (e.g., ykang)')
@@ -550,7 +413,15 @@ def main(argv=None):
     p.add_argument('--spaces', nargs='+', help='Space names for --processConfluence or --moveuser (e.g., DM EPO LSSTOps). Omit to scan all spaces.')
     p.add_argument('--pageid', help='Process a single Confluence page by ID (use with --processConfluence)')
     p.add_argument('--page-url', help='Process a single Confluence page by URL (use with --processConfluence)')
-    p.add_argument('--admin-key', action='store_true', help='Use Confluence admin key to bypass page restrictions (requires Premium/Enterprise and site admin)')
+
+    p.add_argument('--list-personal-pages', metavar='ACCOUNT', help='List all pages in a personal space (account ID, username, or space URL)')
+    p.add_argument('--list-space', metavar='SPACE', help='List all pages in a space (space key like "LSSTOps" or space URL)')
+    p.add_argument('--list-spaces', action='store_true', help='List all Confluence spaces (excludes personal spaces)')
+    p.add_argument('--replace-text', action='store_true', help='Search and replace text in Confluence pages (requires --search-string and --replace-string)')
+    p.add_argument('--search-string', help='String to search for in Confluence pages')
+    p.add_argument('--replace-string', help='String to replace the search string with')
+    p.add_argument('--replace-user', nargs=2, metavar=('SRC', 'DST'), help='Replace user mentions/assignments from SRC account ID to DST account ID')
+    p.add_argument('--confirm', action='store_true', help='Prompt for confirmation before each page update')
 
     args = p.parse_args(argv)
     # reuse existing helper to build login config
@@ -620,16 +491,14 @@ def main(argv=None):
         
         copy_groups(config, src, dst, dry_run=dry_run)
         summary['filters_shared'] = share_all_filters(jira, src, dst, dry_run=dry_run)
-        copied, _ = copy_user_dashboards(jira, src, dst, dry_run=dry_run)
+        copied, _ = transfer_user_dashboards(jira, src, dst, dry_run=dry_run)
         summary['dashboards_copied'] = copied
         summary['watched'] = copy_watcher(config, src, dst, pred)
         summary['reporter_changed'] = copy_reporter(config, src, dst, dry_run, pred)
         summary['reviewer_changed'] = copy_reviewer(config, src, dst, dry_run, pred, getattr(args, 'reviewerField', 'Reviewer'))
         summary['reassigned'] = reassign(config, src, dst, dry_run, pred)
-        confluence = get_confluence_client(config, admin_key=getattr(args, 'admin_key', False))
+        confluence = get_confluence_client(config)
         # Transfer personal space ownership and move pages
-        if not getattr(args, 'admin_key', False):
-            print("WARNING: Personal space transfer works best with --admin-key for restricted pages")
         success, msg, ps_counts = transfer_personal_space(
             config, confluence, src, dst,
             src_username=getattr(args, 'srcUsername', None),
@@ -644,18 +513,10 @@ def main(argv=None):
         summary['confluence_owner'] += ps_counts[2]
         summary['confluence_moved'] = ps_counts[3]
         
-        if args.spaces:
-            for s in args.spaces:
-                edit_cnt, watch_cnt, owner_cnt = process_space(config, confluence, s, src, dst, limit=500, dry_run=dry_run)
-                summary['confluence_edit'] += edit_cnt
-                summary['confluence_watch'] += watch_cnt
-                summary['confluence_owner'] += owner_cnt
-        else:
-            print ("This will take a long time since it will scan all spaces")
-            edit_cnt, watch_cnt, owner_cnt = process_space(config, confluence, "", src, dst, limit=500, dry_run=dry_run)
-            summary['confluence_edit'] += edit_cnt
-            summary['confluence_watch'] += watch_cnt
-            summary['confluence_owner'] += owner_cnt
+        totals = process_spaces(config, confluence, args.spaces, src, dst, limit=500, dry_run=dry_run)
+        summary['confluence_edit'] += totals['edit']
+        summary['confluence_watch'] += totals['watch']
+        summary['confluence_owner'] += totals['owner']
         
         # Print summary
         print("\n" + "=" * 50)
@@ -715,32 +576,15 @@ def main(argv=None):
         share_all_filters(jira, src, dst, dry_run=getattr(args, 'dry_run', False))
         ok = True
 
-    if getattr(args, 'copyDashboards', None):
-        src, dst = args.copyDashboards
+    if getattr(args, 'transferDashboards', None):
+        src, dst = args.transferDashboards
         jira = get_jira_from_config(config)
-        copy_user_dashboards(jira, src, dst, dry_run=getattr(args, 'dry_run', False))
-        ok = True
-
-    if getattr(args, 'copyPersonalSpace', None):
-        src, dst = args.copyPersonalSpace
-        confluence = get_confluence_client(config, admin_key=getattr(args, 'admin_key', False))
-        jira = get_jira_from_config(config)
-        success, msg = copy_personal_space(
-            confluence, src, dst,
-            src_username=getattr(args, 'srcUsername', None),
-            dst_username=getattr(args, 'dstUsername', None),
-            jira=jira,
-            dry_run=getattr(args, 'dry_run', False)
-        )
-        print(msg)
+        transfer_user_dashboards(jira, src, dst, dry_run=getattr(args, 'dry_run', False))
         ok = True
 
     if getattr(args, 'transferSpace', None):
-        if not getattr(args, 'admin_key', False):
-            print("WARNING: --transferSpace requires --admin-key to work on restricted pages")
-            print("         Without admin-key, many pages may fail to transfer")
         src, dst = args.transferSpace
-        confluence = get_confluence_client(config, admin_key=getattr(args, 'admin_key', False))
+        confluence = get_confluence_client(config)
         jira = get_jira_from_config(config)
         success, msg, counts = transfer_personal_space(
             config, confluence, src, dst,
@@ -752,23 +596,9 @@ def main(argv=None):
         print(msg)
         ok = True
 
-    if getattr(args, 'movePersonalSpace', None):
-        src, dst = args.movePersonalSpace
-        confluence = get_confluence_client(config, admin_key=getattr(args, 'admin_key', False))
-        jira = get_jira_from_config(config)
-        success, msg, moved = move_personal_space(
-            confluence, src, dst,
-            src_username=getattr(args, 'srcUsername', None),
-            dst_username=getattr(args, 'dstUsername', None),
-            jira=jira,
-            dry_run=getattr(args, 'dry_run', False)
-        )
-        print(msg)
-        ok = True
-
     if getattr(args, 'updateSpaceOwnership', None):
         account_id = args.updateSpaceOwnership
-        confluence = get_confluence_client(config, admin_key=getattr(args, 'admin_key', False))
+        confluence = get_confluence_client(config)
         jira = get_jira_from_config(config)
         success, msg = update_space_ownership(
             confluence, account_id,
@@ -779,9 +609,137 @@ def main(argv=None):
         print(msg)
         ok = True
 
+    if getattr(args, 'list_personal_pages', None):
+        account = args.list_personal_pages
+        confluence = get_confluence_client(config)
+        base_url = config.get("url")
+        
+        # Check if it's a space URL
+        if account.startswith('http'):
+            import re
+            match = re.search(r'/spaces/(~[^/]+)', account)
+            if match:
+                space_key = match.group(1)
+                print(f"Extracted space key from URL: {space_key}")
+            else:
+                print(f"Could not extract space key from URL: {account}")
+                sys.exit(1)
+        elif account.startswith('~'):
+            space_key = account
+        else:
+            # Look up personal space by account ID or username
+            jira = get_jira_from_config(config)
+            space = get_personal_space(confluence, account, account, jira=jira)
+            if not space:
+                print(f"Could not find personal space for: {account}")
+                sys.exit(1)
+            space_key = space.get("key")
+            print(f"Found personal space: {space.get('name')} ({space_key})")
+        
+        print_space_pages(confluence, space_key, base_url)
+        ok = True
+
+    if getattr(args, 'list_space', None):
+        space_arg = args.list_space
+        confluence = get_confluence_client(config)
+        base_url = config.get("url")
+        
+        # Check if it's a URL
+        if space_arg.startswith('http'):
+            import re
+            match = re.search(r'/spaces/([^/]+)', space_arg)
+            if match:
+                space_key = match.group(1)
+                print(f"Extracted space key from URL: {space_key}")
+            else:
+                print(f"Could not extract space key from URL: {space_arg}")
+                sys.exit(1)
+        else:
+            space_key = space_arg
+        
+        print_space_pages(confluence, space_key, base_url, debug=True)
+        ok = True
+
+    if getattr(args, 'list_spaces', None):
+        confluence = get_confluence_client(config)
+        print("Listing all Confluence spaces (excluding personal spaces):\n")
+        print(f"{'Key':<20} {'Type':<15} {'Name'}")
+        print("-" * 60)
+        for space in list_spaces(confluence):
+            key = space.get("key")
+            name = space.get("name")
+            space_type = space.get("type")
+            if not space_type.startswith('personal'):
+                print(f"{key:<20} {space_type:<15} {name}")
+        ok = True
+
+    if getattr(args, 'replace_text', None):
+        if not args.search_string:
+            print("Error: --replace-text requires --search-string")
+            sys.exit(1)
+        if not args.replace_string:
+            print("Error: --replace-text requires --replace-string")
+            sys.exit(1)
+        
+        confluence = get_confluence_client(config)
+        dry_run = getattr(args, 'dry_run', False)
+        confirm = getattr(args, 'confirm', False)
+        space = getattr(args, 'spaces', None)
+        space_key = space[0] if space else None
+        
+        # Check if single page mode
+        page_url = getattr(args, 'page_url', None)
+        if page_url:
+            print(f"Updating single page: {page_url}")
+            modified = update_single_page(config, page_url, args.search_string, args.replace_string,
+                                          dry_run=dry_run, confirm=confirm)
+            print(f"Pages matched/modified: {len(modified)}")
+        else:
+            print(f"Searching for '{args.search_string}' in Confluence pages...")
+            if space_key:
+                print(f"  (restricted to space: {space_key})")
+            modified = replace_pages(config, args.search_string, args.replace_string,
+                                     space=space_key,
+                                     dry_run=dry_run,
+                                     confirm_per_page=confirm)
+            print(f"Pages matched/modified: {len(modified)}")
+        ok = True
+
+    if getattr(args, 'replace_user', None):
+        src_id, dst_id = args.replace_user
+        confluence = get_confluence_client(config)
+        dry_run = getattr(args, 'dry_run', False)
+        confirm = getattr(args, 'confirm', False)
+        space = getattr(args, 'spaces', None)
+        space_key = space[0] if space else None
+        page_url = getattr(args, 'page_url', None)
+        
+        print(f"Replacing user mentions from {src_id} to {dst_id}...")
+        if dry_run:
+            print("  (dry-run mode)")
+        
+        if page_url:
+            # Single page mode
+            page_id = extract_page_id_from_url(page_url)
+            if page_id:
+                if replace_user_in_page(confluence, page_id, src_id, dst_id, dry_run=dry_run):
+                    print("Pages with user mentions replaced: 1")
+                else:
+                    print("Pages with user mentions replaced: 0")
+        else:
+            # Space mode
+            if not space_key:
+                print("Error: --replace-user requires --spaces or --page-url")
+                sys.exit(1)
+            
+            modified = replace_user_in_space(confluence, space_key, src_id, dst_id, 
+                                              dry_run=dry_run, confirm=confirm)
+            print(f"Pages with user mentions replaced: {len(modified)}")
+        ok = True
+
     if getattr(args, 'processConfluence', None):
         src, dst = args.processConfluence
-        confluence = get_confluence_client(config, admin_key=getattr(args, 'admin_key', False))
+        confluence = get_confluence_client(config)
         dry_run = getattr(args, 'dry_run', False)
         url = f'{config.get("url")}/wiki/'
         
@@ -792,56 +750,10 @@ def main(argv=None):
         
         if page_id:
             # Process single page
-            print(f"Processing single page: {page_id}")
-            owner_id = get_page_owner(confluence, page_id)
-            print(f"  Current owner: {owner_id}")
-            
-            if owner_id == src:
-                # Old user owns - grant edit and change owner
-                if not dry_run:
-                    try:
-                        add_user_to_update_restriction(confluence, url, page_id, dst, dry_run=False)
-                        print(f"  Granted edit to {dst}")
-                    except Exception as e:
-                        print(f"  FAILED to add editor: {e}")
-                
-                if dry_run:
-                    print(f"  Would change owner to {dst}")
-                else:
-                    success, msg = set_page_owner(confluence, page_id, dst)
-                    if success:
-                        print(f"  Changed owner to {dst}")
-                    else:
-                        print(f"  FAILED to change owner: {msg}")
-            else:
-                print(f"  Page not owned by {src}, skipping owner change")
+            process_single_page(config, confluence, page_id, src, dst, dry_run=dry_run)
         else:
             # Process spaces
-            total_edit = 0
-            total_watch = 0
-            total_owner = 0
-            
-            if args.spaces:
-                for s in args.spaces:
-                    print(f"\nProcessing space: {s}")
-                    edit_cnt, watch_cnt, owner_cnt = process_space(config, confluence, s, src, dst, limit=500, dry_run=dry_run)
-                    total_edit += edit_cnt
-                    total_watch += watch_cnt
-                    total_owner += owner_cnt
-            else:
-                print("Processing all spaces (this may take a long time)...")
-                edit_cnt, watch_cnt, owner_cnt = process_space(config, confluence, "", src, dst, limit=500, dry_run=dry_run)
-                total_edit = edit_cnt
-                total_watch = watch_cnt
-                total_owner = owner_cnt
-            
-            print("\n" + "=" * 50)
-            print("CONFLUENCE PROCESSING SUMMARY")
-            print("=" * 50)
-            print(f"Pages with edit access granted: {total_edit}")
-            print(f"Pages with watcher added:       {total_watch}")
-            print(f"Pages with owner changed:       {total_owner}")
-            print("=" * 50)
+            process_spaces(config, confluence, args.spaces, src, dst, limit=500, dry_run=dry_run)
         ok = True
 
     if getattr(args, 'dups', None):
