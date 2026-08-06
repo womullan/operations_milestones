@@ -34,7 +34,7 @@ from opsMiles.ojira import (
 )
 from opsMiles.confluence import (
     process_space, process_spaces, process_single_page, get_confluence_client, update_space_ownership,
-    extract_page_id_from_url, get_page_owner, set_page_owner, add_user_to_update_restriction,
+    extract_page_id_from_url, extract_space_key_from_url, get_page_owner, set_page_owner, add_user_to_update_restriction,
     transfer_personal_space, list_spaces, list_pages_in_space, replace_pages, update_single_page,
     replace_user_in_page, replace_user_in_space, print_space_pages, get_personal_space
 )
@@ -96,288 +96,6 @@ def print_duplicates(dups: Dict) -> None:
                 aid = u.get('accountId') or ''
                 email = u.get('emailAddress') or ''
                 print(f"  - {display} | {aid} | {email}")
-
-
-def get_account_ids_by_display_prefix(config: Dict, prefix: str) -> List[Dict]:
-    """Return list of user info for accounts whose displayName starts with prefix.
-
-    No-frills, case-insensitive startswith. Each result is a dict with keys:
-      - accountId: the Atlassian account id (or fallback key/name)
-      - displayName: the user's displayName
-      - email: the preferred email field if present
-
-    Uses the existing get_all_atlassian_users to fetch users.
-    """
-    if not prefix:
-        return []
-    users = get_all_atlassian_users(config)
-    p = prefix.lower()
-    out = []
-    for u in users:
-        dn = (u.get('displayName') or '')
-        if not dn:
-            continue
-        if dn.lower().startswith(p):
-            aid = u.get('accountId') or u.get('key') or u.get('name') or ''
-            email = u.get('emailAddress') or u.get('email') or u.get('accountEmail') or ''
-            out.append({'accountId': aid, 'displayName': dn, 'email': email})
-    return out
-
-
-def get_issues_assigned(jira: JIRA, account_id: str, pred:str) -> list:
-    """Return the issues assigned to account_id.
-    """
-    issues = list_jira_issues(jira, query=f'project != PREOPS and assignee={account_id}', pred2=pred)
-    return issues
-
-
-def get_issues_watched(jira: JIRA, account_id: str, pred) -> list:
-    """Return the issues assigned to account_id.
-    """
-    issues = list_jira_issues(jira, query=f'project != PREOPS and watcher={account_id} and '
-                                          f'status NOT IN (Closed, Done, Resolved, Cancelled, Deprecated, "Journal Submitted") ', pred2=pred)
-    return issues
-
-
-def get_issues_reported(jira: JIRA, account_id: str, pred) -> list:
-    """Return the issues reported by account_id."""
-    issues = list_jira_issues(jira, query=f'project != PREOPS and reporter={account_id} '
-                                          , pred2=pred)
-    return issues
-
-
-def add_watcher(j:JIRA, config: Dict, account_id: str, issue: str) -> str:
-    base = config.get('url')
-    if not base:
-        raise ValueError('Missing url in config')
-    url = base.rstrip('/') + f'/rest/api/3/issue/{issue}/watchers?notifyUsers=false'
-    headers = {
-        "Content-Type": "application/json"
-    }
-    data = json.dumps(account_id)  # this produces: '"5b10a2844c20165700ede21g"'
-    try:
-        r= j._session.post(url, headers=headers, data=data)
-        r.raise_for_status()  # Raises an HTTPError if status is 4xx/5xx
-    except JIRAError as err:
-        return(err.text)
-    if r and r.status_code == 204:
-        return 'added'
-    return f'error:{r.status_code} {r.text}'
-
-
-def copy_watcher(config: Dict, src:str, dst:str, pred:str) -> int:
-    """For tickets watched by accountIDsrc add dst as a wtacher also"""
-    jira = get_jira_from_config(config)
-    issues = get_issues_watched(jira, src, pred)
-    tot = len(issues)
-    print (f"Got {tot} watched by {src}")
-    problem = []
-    count = 0
-    for i in issues:
-        s = add_watcher(jira, config, dst, i.key)
-        print(f'{i.key} ({count}/{tot}) {s}')
-        if s.startswith('added'):
-            count += 1
-        else:
-            problem.append(i.key)
-    print (f"Of {len(issues)} watched {count} PROBLEMS with :{problem}")
-    print (f"PREOPS is ignored")
-    return count
-
-
-def change_reporter_quiet(jira: JIRA, issue_key: str, account_id: str) -> tuple:
-    """Change reporter on issue without sending notification.
-    
-    Returns (success: bool, error_msg: str or None)
-    """
-    # Try using jira library's update method first (may send notification)
-    try:
-        issue = jira.issue(issue_key)
-        issue.update(fields={'reporter': {'accountId': account_id}}, notify=False)
-        return True, None
-    except JIRAError as e:
-        pass  # Fall through to try direct API
-    except Exception as e:
-        pass
-    
-    # Try direct REST API with notifyUsers=false
-    url = f'{jira.server_url}/rest/api/3/issue/{issue_key}?notifyUsers=false'
-    payload = {
-        'fields': {
-            'reporter': {'accountId': account_id}
-        }
-    }
-    try:
-        r = jira._session.put(url, json=payload)
-        if r.status_code in (200, 204):
-            return True, None
-        try:
-            err = r.json().get('errorMessages', [r.text])
-            errors = r.json().get('errors', {})
-            if errors:
-                err_msg = str(errors)
-            elif err:
-                err_msg = '; '.join(err) if isinstance(err, list) else str(err)
-            else:
-                err_msg = f'{r.status_code}: {r.text}'
-        except Exception:
-            err_msg = f'{r.status_code}: {r.text}'
-        return False, err_msg
-    except JIRAError as e:
-        return False, e.text
-    except Exception as e:
-        return False, str(e)
-
-
-def copy_reporter(config: Dict, src: str, dst: str, dry_run: bool, pred: str) -> int:
-    """Change reporter from src to dst on all issues reported by src."""
-    jira = get_jira_from_config(config)
-    # Verify destination user exists
-    try:
-        dst_user = jira.user(dst)
-        print(f"Destination user: {dst_user.displayName} ({dst})")
-    except Exception as e:
-        print(f"WARNING: Could not verify destination user {dst}: {e}")
-    issues = get_issues_reported(jira, src, pred)
-    tot = len(issues)
-    print(f"Got {tot} reported by {src}")
-    count = 0
-    problem = []
-    if dry_run:
-        print("NO changes - dry run only")
-    for i in issues:
-        if dry_run:
-            print(f"  Would change reporter on {i.key}")
-        else:
-            success, err = change_reporter_quiet(jira, i.key, dst)
-            if success:
-                print(f"Changed reporter ({count}/{tot}) {i.key}")
-                count += 1
-            else:
-                print(f"FAILED to change reporter on {i.key}: {err}")
-                problem.append(i.key)
-    if not dry_run and problem:
-        print(f"Of {tot} issues, changed {count}. PROBLEMS with: {problem}")
-    print("PREOPS is ignored")
-    return count
-
-
-def add_user_to_group(config: Dict, account_id: str, group_name: str) -> str:
-    base = config.get('url')
-    if not base:
-        raise ValueError('Missing url in config')
-    url = base.rstrip('/') + '/rest/api/3/group/user'
-    auth = HTTPBasicAuth(config.get('user'), config.get('password'))
-    params = {'groupname': group_name}
-    payload = {'accountId': account_id}
-    r = requests.post(url, auth=auth, params=params, json=payload)
-    # 201 Created -> added, 409 Conflict -> already a member
-    if r.status_code == 201:
-        return 'added'
-    if r.status_code == 409:
-        return 'exists'
-    return f'error:{r.status_code} {r.text}'
-
-def copy_groups(config: Dict, src_account: str, dst_account: str, dry_run: bool = False) -> None:
-    """Copy all groups where src_account is a member to dst_account.
-
-    Minimal: list groups for src_account, then POST dst_account into each group's members.
-    Prints per-group status and a small summary.
-    """
-    groups = list_user_groups(config, src_account)
-    if not groups:
-        print(f'No groups found for source account {src_account}')
-        return
-    if dry_run:
-        # Compare source groups to destination membership and report what would change
-        dst_groups = list_user_groups(config, dst_account)
-        dst_names = {g.get('name') for g in dst_groups if isinstance(g, dict) and g.get('name')}
-        would_add = 0
-        already = 0
-        skipped = 0
-        print(f'DRY-RUN: comparing groups from {src_account} to {dst_account}...')
-        for g in groups:
-            name = g.get('name') if isinstance(g, dict) else None
-            if not name:
-                print('  - skipping group with no name field')
-                skipped += 1
-                continue
-            if name in dst_names:
-                print(f'  - {name}: already a member (would skip)')
-                already += 1
-            else:
-                print(f'  - {name}: would add')
-                would_add += 1
-        print(f'DRY-RUN summary: would_add={would_add} already={already} skipped={skipped}')
-        return
-
-    added = 0
-    exists = 0
-    errors = 0
-    print(f'Copying groups from {src_account} to {dst_account}...')
-    for g in groups:
-        name = g.get('name') if isinstance(g, dict) else None
-        if not name:
-            print('  - skipping group with no name field')
-            continue
-        res = add_user_to_group(config, dst_account, name)
-        if res == 'added':
-            print(f"  - {name}: added")
-            added += 1
-        elif res == 'exists':
-            print(f"  - {name}: already a member")
-            exists += 1
-        else:
-            print(f"  - {name}: {res}")
-            errors += 1
-    print(f'Finished: added={added} exists={exists} errors={errors}')
-
-def assign_issue_quiet(jira: JIRA, issue_key: str, account_id: str) -> bool:
-    """Assign issue without sending notification.
-    
-    Uses the general issue update endpoint with notifyUsers=false which is
-    more reliable for suppressing notifications than the assignee endpoint.
-    """
-    url = f'{jira.server_url}/rest/api/3/issue/{issue_key}?notifyUsers=false'
-    payload = {
-        'fields': {
-            'assignee': {'accountId': account_id}
-        }
-    }
-    r = jira._session.put(url, json=payload)
-    return r.status_code == 204
-
-
-def reassign(config:dict, src:str, dst:str, dry_run:bool, pred:str) -> int:
-    """Reassign tickets from accoutn id src to accountid dst - return the count"""
-    jira = get_jira_from_config(config)
-    issues = get_issues_assigned(jira, src, pred)
-    tot = len(issues)
-    print (f"Got {tot} for {src}")
-    count = 0
-    problem = []
-    if dry_run:
-        print("NO changes - dry run only ")
-    for i in issues:
-        v = False
-        if  not dry_run:
-            try:
-                #v = jira.assign_issue(i.key, dst)
-                v = assign_issue_quiet(jira, i.key, dst)
-                print(f"Assign ({count}/{tot}) {i.key} to {dst}: {v}")
-            except JIRAError as err:
-                print(f'{i.key} {err.text}')
-        if v:
-           count += 1
-        else:
-            problem.append(i.key)
-
-    if dry_run:
-        print("NO changes - dry run only ")
-    else:
-        if len(problem) > 0:
-            print (f'Of {len(issues)} assigned {count}.  THERE WERE PROBLEMS ASSIGNING :{problem}')
-    return count
 
 
 def main(argv=None):
@@ -613,22 +331,19 @@ def main(argv=None):
         account = args.list_personal_pages
         confluence = get_confluence_client(config)
         base_url = config.get("url")
+        jira = get_jira_from_config(config)
         
-        # Check if it's a space URL
+        # Check if it's a URL, space key, or account ID/username
         if account.startswith('http'):
-            import re
-            match = re.search(r'/spaces/(~[^/]+)', account)
-            if match:
-                space_key = match.group(1)
-                print(f"Extracted space key from URL: {space_key}")
-            else:
+            space_key = extract_space_key_from_url(account)
+            if not space_key:
                 print(f"Could not extract space key from URL: {account}")
                 sys.exit(1)
+            print(f"Extracted space key from URL: {space_key}")
         elif account.startswith('~'):
             space_key = account
         else:
             # Look up personal space by account ID or username
-            jira = get_jira_from_config(config)
             space = get_personal_space(confluence, account, account, jira=jira)
             if not space:
                 print(f"Could not find personal space for: {account}")
@@ -644,16 +359,13 @@ def main(argv=None):
         confluence = get_confluence_client(config)
         base_url = config.get("url")
         
-        # Check if it's a URL
+        # Check if it's a URL or space key
         if space_arg.startswith('http'):
-            import re
-            match = re.search(r'/spaces/([^/]+)', space_arg)
-            if match:
-                space_key = match.group(1)
-                print(f"Extracted space key from URL: {space_key}")
-            else:
+            space_key = extract_space_key_from_url(space_arg)
+            if not space_key:
                 print(f"Could not extract space key from URL: {space_arg}")
                 sys.exit(1)
+            print(f"Extracted space key from URL: {space_key}")
         else:
             space_key = space_arg
         

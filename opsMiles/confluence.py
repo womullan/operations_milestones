@@ -41,20 +41,23 @@ def get_confluence_client(config: dict) -> Confluence:
     return confluence
 
 
-def _paginate_cql(confluence: Confluence, cql: str):
+def _paginate_cql(confluence: Confluence, cql: str, debug: bool = False):
     """Yield result dicts for CQL query, handling paging."""
     start = 0
     limit = 50
     while True:
         r = confluence.cql(cql, start=start, limit=limit)
         results = r.get("results", [])
+        total = r.get("totalSize", 0)
+        if debug:
+            print(f"  CQL page: start={start}, got {len(results)} results, totalSize={total}")
         if not results:
             break
         for item in results:
             yield item
         start += limit
         # Use totalSize (total matching results) not size (current batch size)
-        if start >= r.get("totalSize", 0):
+        if start >= total:
             break
 
 
@@ -223,6 +226,19 @@ def extract_page_id_from_url(url: str) -> Optional[str]:
         return m.group(1)
     # trailing numeric id at end of path
     m = re.search(r"/(\d+)(?:/|$)(?:\?|$)", url)
+    if m:
+        return m.group(1)
+    return None
+
+
+def extract_space_key_from_url(url: str) -> Optional[str]:
+    """Try to extract a Confluence space key from common URL patterns.
+    Returns the space key string or None if not found.
+    Patterns handled:
+      - /spaces/SPACEKEY/...
+      - /spaces/~username/...  (personal spaces)
+    """
+    m = re.search(r"/spaces/([^/]+)", url)
     if m:
         return m.group(1)
     return None
@@ -753,22 +769,18 @@ def replace_user_in_space(confluence, space_key, src_id, dst_id, dry_run=False, 
 def list_pages_in_space(confluence, space_key, debug=False):
     """
     List all pages in a space using CQL.
-    Returns list of dicts with id, title, and url info.
+    
+    Note: CQL and listing APIs only return pages the user has permission to see.
+    The admin key header only helps when directly accessing pages by ID.
+    
+    Returns list of dicts with id, title info.
     """
     cql = f'space = "{space_key}" AND type = page ORDER BY title'
     if debug:
         print(f"  CQL: {cql}")
     
-    # First, check what the raw CQL returns
-    raw = confluence.cql(cql, start=0, limit=5)
-    if debug:
-        print(f"  Raw CQL result keys: {raw.keys()}")
-        print(f"  Total size: {raw.get('totalSize', 'N/A')}")
-        if raw.get("results"):
-            print(f"  First result keys: {raw['results'][0].keys()}")
-    
     pages = []
-    for item in _paginate_cql(confluence, cql):
+    for item in _paginate_cql(confluence, cql, debug=debug):
         # CQL results have page data inside 'content' wrapper
         content = item.get("content", item)
         page_id = content.get("id")
@@ -1158,21 +1170,24 @@ def move_personal_space(confluence, src_account_id: str, dst_account_id: str,
         dst_key = dst_space.get('key')
         print(f"Found destination personal space: {dst_space.get('name', dst_key)} ({dst_key})")
     
-    # Get all pages from source space using get_all_pages_from_space with proper pagination
+    # Get all pages from source space using CQL (more reliable for restricted pages)
     all_pages = []
-    start = 0
-    limit = 50
+    cql = f'space = "{src_key}" AND type = page'
     
-    while True:
-        pages = confluence.get_all_pages_from_space(space=src_key, start=start, limit=limit, expand='ancestors')
-        print(f"  Fetched {len(pages) if pages else 0} pages at offset {start}")
-        if not pages:
-            break
-        all_pages.extend(pages)
-        start += limit
-        # Safety check - if we got fewer than limit, we're done
-        if len(pages) < limit:
-            break
+    for item in _paginate_cql(confluence, cql):
+        # CQL results have page data inside 'content' wrapper
+        content = item.get("content", item)
+        page_id = content.get("id")
+        if not page_id:
+            continue
+        # Fetch full page details with ancestors for hierarchy
+        try:
+            page = confluence.get_page_by_id(page_id, expand='ancestors')
+            all_pages.append(page)
+        except Exception as e:
+            print(f"  Warning: could not fetch page {page_id}: {e}")
+    
+    print(f"Found {len(all_pages)} total pages to move")
     
     if not all_pages:
         return True, "No pages found in source space", 0
@@ -1294,8 +1309,19 @@ def copy_personal_space(confluence, src_account_id: str, dst_account_id: str,
     dst_name = dst_space.get('name', dst_key)
     print(f"Found destination personal space: {dst_name} ({dst_key})")
     
-    # Get all pages from source space
-    pages = confluence.get_all_pages_from_space(src_key, expand='body.storage')
+    # Get all pages from source space using CQL (more reliable for restricted pages)
+    pages = []
+    cql = f'space = "{src_key}" AND type = page'
+    for item in _paginate_cql(confluence, cql):
+        content = item.get("content", item)
+        page_id = content.get("id")
+        if page_id:
+            try:
+                page = confluence.get_page_by_id(page_id, expand='body.storage')
+                pages.append(page)
+            except Exception as e:
+                print(f"  Warning: could not fetch page {page_id}: {e}")
+    
     if not pages:
         return True, f"No pages found in {src_key}"
     
@@ -1348,8 +1374,16 @@ def update_space_ownership(confluence, account_id: str,
     space_name = space.get('name', space_key)
     print(f"Found personal space: {space_name} ({space_key})")
     
-    # Get all pages from the space
-    pages = confluence.get_all_pages_from_space(space_key)
+    # Get all pages from the space using CQL (more reliable for restricted pages)
+    pages = []
+    cql = f'space = "{space_key}" AND type = page'
+    for item in _paginate_cql(confluence, cql):
+        content = item.get("content", item)
+        page_id = content.get("id")
+        title = item.get("title") or content.get("title", f"Page {page_id}")
+        if page_id:
+            pages.append({'id': page_id, 'title': title})
+    
     if not pages:
         return True, f"No pages found in {space_key}"
     

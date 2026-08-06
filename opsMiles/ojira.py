@@ -804,28 +804,44 @@ def get_user_dashboards(jira: JIRA, account_id: str) -> list:
 
 
 def change_dashboard_owner(jira: JIRA, dashboard_id: str, new_owner_id: str) -> tuple:
-    """Change the owner of a dashboard.
+    """Copy a dashboard and share with new user.
     
-    Returns (success: bool, error_msg: str or None)
+    Returns (success: bool, message: str)
+    
+    Note: Jira Cloud doesn't have an API to change dashboard ownership.
+    This copies the dashboard and shares it with the new user.
     """
-    url = f'{jira.server_url}/rest/api/3/dashboard/bulk/edit'
-    payload = {
-        'action': 'changeOwner',
-        'entityIds': [int(dashboard_id)],
-        'newOwner': new_owner_id,
-        'extendAdminPermissions': True
-    }
-    
+    # First get the dashboard details
+    get_url = f'{jira.server_url}/rest/api/3/dashboard/{dashboard_id}'
     try:
-        r = jira._session.put(url, json=payload)
-        if r.status_code in (200, 204):
-            return True, None
+        r = jira._session.get(get_url)
+        if r.status_code != 200:
+            return False, f"Could not get dashboard: {r.status_code}"
+        
+        dashboard = r.json()
+        dash_name = dashboard.get('name', 'Unknown')
+        
+        # Copy the dashboard with permissions for the new user
+        copy_url = f'{jira.server_url}/rest/api/3/dashboard/{dashboard_id}/copy'
+        copy_payload = {
+            'name': dash_name,
+            'editPermissions': [{'type': 'user', 'user': {'accountId': new_owner_id}}],
+            'sharePermissions': [{'type': 'user', 'user': {'accountId': new_owner_id}}]
+        }
+        
+        r = jira._session.post(copy_url, json=copy_payload)
+        if r.status_code in (200, 201):
+            new_dash = r.json()
+            new_id = new_dash.get('id', 'unknown')
+            return True, f"copied to dashboard {new_id}"
+        
         try:
             err = r.json().get('errorMessages', [r.text])
             err_msg = '; '.join(err) if isinstance(err, list) else str(err)
         except Exception:
             err_msg = r.text
         return False, err_msg
+        
     except Exception as e:
         return False, str(e)
 
@@ -833,36 +849,14 @@ def change_dashboard_owner(jira: JIRA, dashboard_id: str, new_owner_id: str) -> 
 def transfer_dashboard(jira: JIRA, dashboard_id: str, new_owner_id: str) -> tuple:
     """Transfer a dashboard to a new owner and grant edit permission.
     
+    Note: Jira Cloud doesn't have an API to change dashboard ownership.
+    This grants edit permission to the new user instead.
+    
     Returns (success: bool, message: str)
     """
-    messages = []
-    
-    # Change ownership
-    owner_success, owner_err = change_dashboard_owner(jira, dashboard_id, new_owner_id)
-    if owner_success:
-        messages.append("owner changed")
-    else:
-        messages.append(f"owner change failed: {owner_err}")
-    
-    # Grant edit permission
-    url = f'{jira.server_url}/rest/api/3/dashboard/{dashboard_id}/permission'
-    payload = {
-        'type': 'user',
-        'user': {'accountId': new_owner_id},
-        'rights': 'EDIT'
-    }
-    try:
-        r = jira._session.post(url, json=payload)
-        if r.status_code in (200, 201):
-            messages.append("edit permission granted")
-        elif r.status_code == 400 and 'already' in r.text.lower():
-            messages.append("already has permission")
-        else:
-            messages.append(f"permission grant failed: {r.text[:100]}")
-    except Exception as e:
-        messages.append(f"permission grant failed: {str(e)}")
-    
-    return owner_success, "; ".join(messages)
+    # Grant edit permission (this is all we can do via API)
+    success, msg = change_dashboard_owner(jira, dashboard_id, new_owner_id)
+    return success, msg if msg else "edit permission granted"
 
 
 def transfer_user_dashboards(jira: JIRA, src_account: str, dst_account: str, dry_run: bool = False) -> tuple:
