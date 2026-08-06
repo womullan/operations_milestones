@@ -121,6 +121,7 @@ def main(argv=None):
     p.add_argument('--listUserFields', action='store_true', help='List all user-type fields in Jira')
     p.add_argument('--transferFilters', nargs=2, metavar=('SRC','DST'), help='Transfer all Jira filters owned by SRC to DST accountId')
     p.add_argument('--transferDashboards', nargs=2, metavar=('SRC','DST'), help='Transfer all Jira dashboards from SRC to DST accountId')
+    p.add_argument('--copyDashboard', nargs=3, metavar=('DASH_ID', 'SRC', 'DST'), help='Copy a single dashboard by ID from SRC to DST user (for debugging)')
     p.add_argument('--transferSpace', nargs=2, metavar=('SRC','DST'), help='Transfer ownership and move pages from SRC\'s personal space to DST')
     p.add_argument('--updateSpaceOwnership', metavar='ACCOUNT_ID', help='Update ownership of all pages in user\'s personal space to that user')
     p.add_argument('--processConfluence', nargs=2, metavar=('SRC','DST'), help='Process Confluence spaces: transfer edit perms, watchers, and ownership from SRC to DST')
@@ -298,6 +299,28 @@ def main(argv=None):
         src, dst = args.transferDashboards
         jira = get_jira_from_config(config)
         transfer_user_dashboards(jira, src, dst, dry_run=getattr(args, 'dry_run', False))
+        ok = True
+
+    if getattr(args, 'copyDashboard', None):
+        dash_id, src, dst = args.copyDashboard
+        jira = get_jira_from_config(config)
+        # Get the dashboard details first for debugging
+        get_url = f'{jira.server_url}/rest/api/3/dashboard/{dash_id}'
+        r = jira._session.get(get_url)
+        if r.status_code == 200:
+            dashboard = r.json()
+            print(f"Dashboard {dash_id}: {dashboard.get('name')}")
+            print(f"  Owner: {dashboard.get('owner', {}).get('displayName')} ({dashboard.get('owner', {}).get('accountId')})")
+            print(f"  sharePermissions: {dashboard.get('sharePermissions')}")
+            print(f"  editPermissions: {dashboard.get('editPermissions')}")
+        else:
+            print(f"Could not get dashboard {dash_id}: {r.status_code} {r.text}")
+        
+        success, msg = transfer_dashboard(jira, dash_id, dst, src_owner_id=src)
+        if success:
+            print(f"SUCCESS: {msg}")
+        else:
+            print(f"FAILED: {msg}")
         ok = True
 
     if getattr(args, 'transferSpace', None):
