@@ -30,6 +30,7 @@ from opsMiles.ojira import (
     change_reporter_quiet, copy_reporter, copy_reviewer, reassign,
     get_user_filters, share_filter, share_all_filters,
     get_user_dashboards, transfer_dashboard, transfer_user_dashboards,
+    copy_dashboard_to_user, add_dashboard_to_favorites,
     list_user_fields
 )
 from opsMiles.confluence import (
@@ -316,9 +317,15 @@ def main(argv=None):
         else:
             print(f"Could not get dashboard {dash_id}: {r.status_code} {r.text}")
         
-        success, msg = transfer_dashboard(jira, dash_id, dst, src_owner_id=src)
+        # Copy dashboard to DST user with debug output
+        print(f"\nCopying dashboard to {dst}...")
+        success, msg, new_id = copy_dashboard_to_user(jira, dash_id, dst, src_owner_id=src, debug=True)
         if success:
             print(f"SUCCESS: {msg}")
+            # Also try to add to favorites
+            if new_id:
+                fav_success, fav_msg = add_dashboard_to_favorites(jira, new_id)
+                print(f"Favorites: {fav_msg}")
         else:
             print(f"FAILED: {msg}")
         ok = True

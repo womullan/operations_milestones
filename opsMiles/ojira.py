@@ -803,18 +803,25 @@ def get_user_dashboards(jira: JIRA, account_id: str) -> list:
     return []
 
 
-def cp_dashboard_share(jira: JIRA, dashboard_id: str, new_owner_id: str, src_owner_id: str = None) -> tuple:
-    """Copy a dashboard and share with new user, preserving original visibility.
-
+def add_dashboard_to_favorites(jira: JIRA, dashboard_id: str) -> tuple:
+    """Add a dashboard to favorites (for the API user).
     
     Returns (success: bool, message: str)
+    """
+    fav_url = f'{jira.server_url}/rest/api/3/dashboard/{dashboard_id}/favourite'
+    try:
+        r = jira._session.put(fav_url)
+        if r.status_code in (200, 204):
+            return True, "added to favorites"
+        return False, f"Could not add to favorites: {r.status_code}"
+    except Exception as e:
+        return False, str(e)
+
+
+def copy_dashboard_to_user(jira: JIRA, dashboard_id: str, new_owner_id: str, src_owner_id: str = None, debug: bool = False) -> tuple:
+    """Copy a dashboard and share with new user, preserving original visibility.
     
-    Note: Jira Cloud doesn't have an API to change dashboard ownership.
-    This copies the dashboard, preserves share permissions, and adds the new user.
-    If a dashboard with the same name already exists (from a previous copy), it's deleted first.
-    
-    Args:
-        src_owner_id: Optional source owner ID - used to restrict which dashboards can be deleted
+    Returns (success: bool, message: str, new_dashboard_id: str or None)
     """
     # Get the current API user ID
     try:
@@ -829,13 +836,12 @@ def cp_dashboard_share(jira: JIRA, dashboard_id: str, new_owner_id: str, src_own
     try:
         r = jira._session.get(get_url)
         if r.status_code != 200:
-            return False, f"Could not get dashboard: {r.status_code}"
+            return False, f"Could not get dashboard: {r.status_code}", None
         
         dashboard = r.json()
         dash_name = dashboard.get('name', 'Unknown')
         
-        # Get original permissions and clean them for the copy API
-        # Only keep type, user, group, role - strip extra fields that cause errors
+        # Clean permissions for the copy API
         def clean_permission(p):
             ptype = p.get('type')
             if ptype == 'user':
@@ -848,7 +854,11 @@ def cp_dashboard_share(jira: JIRA, dashboard_id: str, new_owner_id: str, src_own
                 elif group.get('name'):
                     return {'type': 'group', 'group': {'name': group.get('name')}}
             elif ptype == 'project':
-                return {'type': 'project', 'project': p.get('project', {})}
+                proj = p.get('project', {})
+                # Only include id for project
+                if proj.get('id'):
+                    return {'type': 'project', 'project': {'id': proj.get('id')}}
+                return None
             elif ptype == 'loggedin':
                 return {'type': 'loggedin'}
             elif ptype == 'global':
@@ -861,10 +871,13 @@ def cp_dashboard_share(jira: JIRA, dashboard_id: str, new_owner_id: str, src_own
         original_edit = [clean_permission(p) for p in dashboard.get('editPermissions', [])]
         original_edit = [p for p in original_edit if p]  # Remove None entries
         
+        if debug:
+            print(f"  Cleaned sharePermissions: {original_share}")
+            print(f"  Cleaned editPermissions: {original_edit}")
+        
         # Add new user to permissions if not already present
         new_user_perm = {'type': 'user', 'user': {'accountId': new_owner_id}}
         
-        # Check if user already in share permissions
         has_share = any(
             p.get('type') == 'user' and p.get('user', {}).get('accountId') == new_owner_id
             for p in original_share
@@ -872,7 +885,6 @@ def cp_dashboard_share(jira: JIRA, dashboard_id: str, new_owner_id: str, src_own
         if not has_share:
             original_share = original_share + [new_user_perm]
         
-        # Check if user already in edit permissions
         has_edit = any(
             p.get('type') == 'user' and p.get('user', {}).get('accountId') == new_owner_id
             for p in original_edit
@@ -880,10 +892,9 @@ def cp_dashboard_share(jira: JIRA, dashboard_id: str, new_owner_id: str, src_own
         if not has_edit:
             original_edit = original_edit + [new_user_perm]
         
-        # Check if a dashboard with this name already exists and delete it
-        # Only delete if owned by dst or the API user (NOT src - that's the original)
+        # Delete existing copies (only if owned by dst or API user)
         allowed_owners = {new_owner_id, api_user_id}
-        allowed_owners.discard('')  # Remove empty strings
+        allowed_owners.discard('')
         
         search_url = f'{jira.server_url}/rest/api/3/dashboard/search'
         params = {'maxResults': 200, 'expand': 'owner'}
@@ -893,20 +904,17 @@ def cp_dashboard_share(jira: JIRA, dashboard_id: str, new_owner_id: str, src_own
             for existing_dash in existing:
                 if existing_dash.get('name') == dash_name:
                     existing_id = existing_dash.get('id')
-                    # Skip the source dashboard
                     if str(existing_id) == str(dashboard_id):
                         continue
-                    # Only delete if owner is in allowed list
                     owner_id = existing_dash.get('owner', {}).get('accountId', '')
                     if owner_id not in allowed_owners:
                         continue
-                    # Try to delete it
                     del_url = f'{jira.server_url}/rest/api/3/dashboard/{existing_id}'
                     del_r = jira._session.delete(del_url)
                     if del_r.status_code in (200, 204):
                         print(f"    Deleted existing dashboard {existing_id}: {dash_name}")
         
-        # Copy the dashboard preserving original permissions
+        # Copy the dashboard
         copy_url = f'{jira.server_url}/rest/api/3/dashboard/{dashboard_id}/copy'
         copy_payload = {
             'name': dash_name,
@@ -914,32 +922,40 @@ def cp_dashboard_share(jira: JIRA, dashboard_id: str, new_owner_id: str, src_own
             'sharePermissions': original_share
         }
         
+        if debug:
+            print(f"  Copy payload: {copy_payload}")
+        
         r = jira._session.post(copy_url, json=copy_payload)
         if r.status_code in (200, 201):
             new_dash = r.json()
             new_id = new_dash.get('id', 'unknown')
-            return True, f"copied to dashboard {new_id}"
+            return True, f"copied to dashboard {new_id}", new_id
         
         try:
             err = r.json().get('errorMessages', [r.text])
             err_msg = '; '.join(err) if isinstance(err, list) else str(err)
         except Exception:
             err_msg = r.text
-        return False, err_msg
+        return False, err_msg, None
         
     except Exception as e:
-        return False, str(e)
+        return False, str(e), None
 
 
 def transfer_dashboard(jira: JIRA, dashboard_id: str, new_owner_id: str, src_owner_id: str = None) -> tuple:
     """Transfer a dashboard to a new owner by copying it.
     
-    Note: Jira Cloud doesn't have an API to change dashboard ownership.
-    This copies the dashboard and shares it with the new user.
+    Note: Jira Cloud doesn't have an API to change dashboard ownership or update permissions.
+    This copies the dashboard with the new user as editor.
     
     Returns (success: bool, message: str)
     """
-    success, msg = cp_dashboard_share(jira, dashboard_id, new_owner_id, src_owner_id=src_owner_id)
+    success, msg, new_id = copy_dashboard_to_user(jira, dashboard_id, new_owner_id, src_owner_id=src_owner_id)
+    if success and new_id:
+        # Try to add the new dashboard to favorites
+        fav_success, fav_msg = add_dashboard_to_favorites(jira, new_id)
+        if fav_success:
+            msg = f"{msg}, {fav_msg}"
     return success, msg if msg else "copied"
 
 

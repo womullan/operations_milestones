@@ -459,8 +459,12 @@ def process_space(
     new_account_id,
     limit=50,
     dry_run=False,
+    page_ids=None,
 ):
     """Process a Confluence space to transfer edit permissions, watchers, ownership, and mentions.
+    
+    Args:
+        page_ids: Optional list of page IDs to process. If None, will fetch all pages in space.
     
     Returns tuple (edit_count, watch_count, owner_count, page_count, mention_count) with number of pages modified.
     """
@@ -470,17 +474,13 @@ def process_space(
     pcount = 0
     mcount = 0
     
-    # Use CQL to get ALL pages in space (more reliable than get_all_pages_from_space)
-    cql = f'space = "{space_key}" AND type = page'
+    # Get all page IDs using both CQL and Content API methods (if not provided)
+    if page_ids is None:
+        page_ids = get_all_space_page_ids(confluence, space_key, debug=False)
     
-    for item in _paginate_cql(confluence, cql):
-        # CQL results have page data inside 'content' wrapper
-        content = item.get("content", item)
-        page_id = content.get("id")
-        title = item.get("title") or content.get("title", f"Page {page_id}")
-        if not page_id:
-            continue
+    for page_id in page_ids:
         pcount += 1
+        title = f"Page {page_id}"
         if (pcount % 100) == 0:
             print(f"Checked {pcount} pages")
 
@@ -724,19 +724,16 @@ def replace_user_in_space(confluence, space_key, src_id, dst_id, dry_run=False, 
     
     Returns list of page IDs that were modified.
     """
-    cql = f'space = "{space_key}" AND type = page'
     modified = []
     page_count = 0
     confirm_all = not confirm  # If confirm is False, apply to all
     
     print(f"  Scanning space: {space_key}")
     
-    for item in _paginate_cql(confluence, cql):
-        content = item.get("content", item)
-        page_id = content.get("id")
-        if not page_id:
-            continue
-        
+    # Get all page IDs using both CQL and Content API methods
+    page_ids = get_all_space_page_ids(confluence, space_key, debug=False)
+    
+    for page_id in page_ids:
         page_count += 1
         if page_count % 100 == 0:
             print(f"  Checked {page_count} pages...")
@@ -764,6 +761,104 @@ def replace_user_in_space(confluence, space_key, src_id, dst_id, dry_run=False, 
     
     print(f"  Scanned {page_count} pages total")
     return modified
+
+
+def list_pages_in_space_via_content_api(confluence, space_key, debug=False):
+    """
+    List pages in a space using the Space Content API (/rest/api/space/{key}/content).
+    
+    This may return different results than CQL for spaces with restricted pages.
+    
+    Returns list of dicts with id, title info.
+    """
+    pages = []
+    start = 0
+    limit = 50
+    base_url = confluence.url.rstrip('/')
+    if not base_url.endswith('/wiki'):
+        base_url = base_url + '/wiki'
+    
+    while True:
+        url = f"{base_url}/rest/api/space/{space_key}/content/page"
+        params = {"start": start, "limit": limit, "expand": "version"}
+        
+        if debug:
+            print(f"  Content API: {url} start={start}")
+        
+        try:
+            resp = confluence.session.get(url, params=params)
+            if resp.status_code == 404:
+                if debug:
+                    print(f"  Space {space_key} not found or no access")
+                break
+            resp.raise_for_status()
+            data = resp.json()
+        except Exception as e:
+            if debug:
+                print(f"  Error: {e}")
+            break
+        
+        results = data.get("results", [])
+        if debug:
+            print(f"  Got {len(results)} pages, size={data.get('size', 0)}")
+        
+        for item in results:
+            page_id = item.get("id")
+            title = item.get("title", "Unknown")
+            if page_id:
+                pages.append({
+                    "id": page_id,
+                    "title": title,
+                })
+        
+        # Check if there are more pages
+        links = data.get("_links", {})
+        if "next" not in links or len(results) < limit:
+            break
+        start += limit
+    
+    return pages
+
+
+def get_all_space_page_ids(confluence, space_key, debug=False):
+    """
+    Get all page IDs in a space using both CQL and Content API methods.
+    
+    This combines results from both methods to maximize coverage of pages
+    that may have restricted permissions.
+    
+    Returns list of page IDs (strings).
+    """
+    all_ids = set()
+    
+    # Method 1: CQL
+    cql = f'space = "{space_key}" AND type = page'
+    if debug:
+        print(f"  CQL query: {cql}")
+    cql_count = 0
+    for item in _paginate_cql(confluence, cql):
+        content = item.get("content", item)
+        page_id = content.get("id")
+        if page_id:
+            all_ids.add(str(page_id))
+            cql_count += 1
+    if debug:
+        print(f"  CQL found: {cql_count} pages")
+    
+    # Method 2: Content API
+    content_pages = list_pages_in_space_via_content_api(confluence, space_key, debug=debug)
+    content_count = 0
+    for p in content_pages:
+        if p.get('id'):
+            pid = str(p['id'])
+            if pid not in all_ids:
+                content_count += 1
+            all_ids.add(pid)
+    if debug:
+        print(f"  Content API added: {content_count} additional pages")
+        print(f"  Total unique pages: {len(all_ids)}")
+    
+    return list(all_ids)
 
 
 def list_pages_in_space(confluence, space_key, debug=False):
@@ -795,11 +890,33 @@ def list_pages_in_space(confluence, space_key, debug=False):
 
 def print_space_pages(confluence, space_key, base_url, debug=False):
     """
-    List and print all pages in a space.
+    List and print all pages in a space, using the combined CQL + Content API method.
     """
     print(f"\nListing pages in space: {space_key}")
-    pages = list_pages_in_space(confluence, space_key, debug=debug)
-    print(f"Found {len(pages)} pages:\n")
+    
+    # Use the combined method that both CQL and Content API
+    page_ids = get_all_space_page_ids(confluence, space_key, debug=debug)
+    
+    # Fetch title for each page
+    pages = []
+    for page_id in page_ids:
+        try:
+            page = confluence.get_page_by_id(page_id)
+            pages.append({
+                'id': page_id,
+                'title': page.get('title', f'Page {page_id}')
+            })
+        except Exception as e:
+            if debug:
+                print(f"  Warning: could not fetch page {page_id}: {e}")
+            pages.append({
+                'id': page_id,
+                'title': f'Page {page_id} (inaccessible)'
+            })
+    
+    pages = sorted(pages, key=lambda x: x.get('title', ''))
+    
+    print(f"\nFound {len(pages)} pages:\n")
     for page in pages:
         page_url = f"{base_url}/wiki/pages/{page['id']}"
         print(f"  {page['title']}")
@@ -1129,22 +1246,29 @@ def move_page_to_space(confluence, page_id: str, dst_space_key: str, dst_parent_
 
 def move_personal_space(confluence, src_account_id: str, dst_account_id: str,
                         src_username: str = None, dst_username: str = None,
-                        jira=None, dry_run: bool = False) -> tuple:
+                        jira=None, dry_run: bool = False,
+                        src_key: str = None, page_ids: list = None) -> tuple:
     """
     Move all pages from src user's personal space to dst user's personal space.
     Creates the destination space if it doesn't exist.
     
+    Args:
+        src_key: Optional source space key. If None, will look up from src_account_id.
+        page_ids: Optional list of page IDs to move. If None, will fetch all pages in space.
+    
     Returns (success: bool, message: str, moved_count: int)
     """
-    # Find source space
-    print(f"Looking for source user's personal space...")
-    src_space = get_personal_space(confluence, src_account_id, src_username, jira=jira)
-    if not src_space:
-        return False, f"No personal space found for {src_account_id}", 0
-    
-    src_key = src_space.get('key')
-    src_name = src_space.get('name', src_key)
-    print(f"Found source personal space: {src_name} ({src_key})")
+    # Find source space (if not provided)
+    if not src_key:
+        print(f"Looking for source user's personal space...")
+        src_space = get_personal_space(confluence, src_account_id, src_username, jira=jira)
+        if not src_space:
+            return False, f"No personal space found for {src_account_id}", 0
+        src_key = src_space.get('key')
+        src_name = src_space.get('name', src_key)
+        print(f"Found source personal space: {src_name} ({src_key})")
+    else:
+        print(f"Using provided source space: {src_key}")
     
     # Find or create destination space
     print(f"Looking for destination user's personal space...")
@@ -1170,16 +1294,14 @@ def move_personal_space(confluence, src_account_id: str, dst_account_id: str,
         dst_key = dst_space.get('key')
         print(f"Found destination personal space: {dst_space.get('name', dst_key)} ({dst_key})")
     
-    # Get all pages from source space using CQL (more reliable for restricted pages)
+    # Get all pages from source space (if not provided)
     all_pages = []
-    cql = f'space = "{src_key}" AND type = page'
+    if page_ids is None:
+        page_ids = get_all_space_page_ids(confluence, src_key, debug=True)
+    else:
+        print(f"Using {len(page_ids)} pre-fetched page IDs")
     
-    for item in _paginate_cql(confluence, cql):
-        # CQL results have page data inside 'content' wrapper
-        content = item.get("content", item)
-        page_id = content.get("id")
-        if not page_id:
-            continue
+    for page_id in page_ids:
         # Fetch full page details with ancestors for hierarchy
         try:
             page = confluence.get_page_by_id(page_id, expand='ancestors')
@@ -1261,11 +1383,16 @@ def transfer_personal_space(config, confluence, src_account_id: str, dst_account
     src_name = src_space.get('name', src_key)
     print(f"Found personal space: {src_name} ({src_key})")
     
+    # Get all page IDs once, pass to both functions
+    print(f"Finding all pages in space...")
+    page_ids = get_all_space_page_ids(confluence, src_key, debug=True)
+    print(f"Found {len(page_ids)} pages to process")
+    
     # Process the space to transfer ownership
-    print(f"Transferring ownership from {src_account_id} to {dst_account_id}...")
+    print(f"\nTransferring ownership from {src_account_id} to {dst_account_id}...")
     edit_cnt, watch_cnt, owner_cnt, page_cnt, mention_cnt = process_space(
         config, confluence, src_key, src_account_id, dst_account_id,
-        limit=500, dry_run=dry_run
+        limit=500, dry_run=dry_run, page_ids=page_ids
     )
     
     # Always move pages to destination user's personal space
@@ -1273,7 +1400,8 @@ def transfer_personal_space(config, confluence, src_account_id: str, dst_account
     success, msg, moved_cnt = move_personal_space(
         confluence, src_account_id, dst_account_id,
         src_username=src_username, dst_username=dst_username,
-        jira=jira, dry_run=dry_run
+        jira=jira, dry_run=dry_run,
+        src_key=src_key, page_ids=page_ids
     )
     print(f"Move result: {msg}")
     
@@ -1309,18 +1437,15 @@ def copy_personal_space(confluence, src_account_id: str, dst_account_id: str,
     dst_name = dst_space.get('name', dst_key)
     print(f"Found destination personal space: {dst_name} ({dst_key})")
     
-    # Get all pages from source space using CQL (more reliable for restricted pages)
+    # Get all pages from source space using both CQL and Content API methods
     pages = []
-    cql = f'space = "{src_key}" AND type = page'
-    for item in _paginate_cql(confluence, cql):
-        content = item.get("content", item)
-        page_id = content.get("id")
-        if page_id:
-            try:
-                page = confluence.get_page_by_id(page_id, expand='body.storage')
-                pages.append(page)
-            except Exception as e:
-                print(f"  Warning: could not fetch page {page_id}: {e}")
+    page_ids = get_all_space_page_ids(confluence, src_key, debug=True)
+    for page_id in page_ids:
+        try:
+            page = confluence.get_page_by_id(page_id, expand='body.storage')
+            pages.append(page)
+        except Exception as e:
+            print(f"  Warning: could not fetch page {page_id}: {e}")
     
     if not pages:
         return True, f"No pages found in {src_key}"
@@ -1374,15 +1499,9 @@ def update_space_ownership(confluence, account_id: str,
     space_name = space.get('name', space_key)
     print(f"Found personal space: {space_name} ({space_key})")
     
-    # Get all pages from the space using CQL (more reliable for restricted pages)
-    pages = []
-    cql = f'space = "{space_key}" AND type = page'
-    for item in _paginate_cql(confluence, cql):
-        content = item.get("content", item)
-        page_id = content.get("id")
-        title = item.get("title") or content.get("title", f"Page {page_id}")
-        if page_id:
-            pages.append({'id': page_id, 'title': title})
+    # Get all pages from the space using both CQL and Content API methods
+    page_ids = get_all_space_page_ids(confluence, space_key, debug=True)
+    pages = [{'id': pid, 'title': f"Page {pid}"} for pid in page_ids]
     
     if not pages:
         return True, f"No pages found in {space_key}"
