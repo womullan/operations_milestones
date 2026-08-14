@@ -1084,6 +1084,15 @@ def move_page_to_space(confluence, page_id: str, dst_space_key: str, dst_parent_
         body = page.get('body', {}).get('storage', {}).get('value', '')
         version = page.get('version', {}).get('number', 1)
         
+        # Check if a page with the same title already exists in destination space
+        try:
+            cql = f'space = "{dst_space_key}" AND title = "{title}" AND type = page'
+            existing = confluence.cql(cql, limit=1)
+            if existing.get('results'):
+                return False, "skipped - same title exists in destination"
+        except Exception:
+            pass  # Continue with move attempt if check fails
+        
         # Update page with new space using PUT
         update_url = f"{base_url}/rest/api/content/{page_id}"
         
@@ -1308,7 +1317,7 @@ def move_personal_space(confluence, src_account_id: str, dst_account_id: str,
                 moved += 1
                 # The page keeps its ID after move
                 id_mapping[page_id] = page_id
-            elif 'already exists' in msg:
+            elif 'skipped' in msg.lower() or 'already exists' in msg.lower() or 'same title' in msg.lower():
                 print(f"  Skipped (exists): {title}")
                 skipped += 1
                 id_mapping[page_id] = page_id
