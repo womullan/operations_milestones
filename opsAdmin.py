@@ -36,7 +36,7 @@ from opsMiles.ojira import (
 from opsMiles.confluence import (
     process_space, process_spaces, process_single_page, get_confluence_client, update_space_ownership,
     extract_page_id_from_url, extract_space_key_from_url, get_page_owner, set_page_owner, add_user_to_update_restriction,
-    transfer_personal_space, list_spaces, list_pages_in_space, replace_pages, update_single_page,
+    transfer_personal_space, list_spaces, replace_pages, update_single_page,
     replace_user_in_page, replace_user_in_space, print_space_pages, get_personal_space, move_personal_space
 )
 

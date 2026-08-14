@@ -763,158 +763,32 @@ def replace_user_in_space(confluence, space_key, src_id, dst_id, dry_run=False, 
     return modified
 
 
-def list_pages_in_space_via_content_api(confluence, space_key, debug=False):
-    """
-    List pages in a space using the Space Content API (/rest/api/space/{key}/content).
-    
-    This may return different results than CQL for spaces with restricted pages.
-    
-    Returns list of dicts with id, title info.
-    """
-    pages = []
-    start = 0
-    limit = 50
-    
-    # Try using the library's built-in method first
-    if debug:
-        print(f"  Trying get_all_pages_from_space for {space_key}...")
-    try:
-        lib_pages = confluence.get_all_pages_from_space(space_key, start=0, limit=500, expand='version')
-        if lib_pages:
-            if debug:
-                print(f"  Library method found {len(lib_pages)} pages")
-            for item in lib_pages:
-                page_id = item.get("id")
-                title = item.get("title", "Unknown")
-                if page_id:
-                    pages.append({"id": page_id, "title": title})
-            return pages
-        elif debug:
-            print(f"  Library method returned empty/None")
-    except Exception as e:
-        if debug:
-            print(f"  Library method failed: {e}")
-    
-    # Fallback to direct API call
-    base_url = confluence.url.rstrip('/')
-    if not base_url.endswith('/wiki'):
-        base_url = base_url + '/wiki'
-    
-    while True:
-        url = f"{base_url}/rest/api/space/{space_key}/content/page"
-        params = {"start": start, "limit": limit, "expand": "version"}
-        
-        if debug:
-            print(f"  Content API: {url} start={start}")
-        
-        try:
-            resp = confluence.session.get(url, params=params)
-            if debug:
-                print(f"  Response status: {resp.status_code}")
-            if resp.status_code == 404:
-                if debug:
-                    print(f"  Space {space_key} not found or no access")
-                break
-            if resp.status_code != 200:
-                if debug:
-                    print(f"  Unexpected status {resp.status_code}: {resp.text[:500]}")
-                break
-            data = resp.json()
-            if debug and not data.get("results"):
-                print(f"  Raw response keys: {list(data.keys())}")
-        except Exception as e:
-            if debug:
-                print(f"  Error: {e}")
-            break
-        
-        results = data.get("results", [])
-        if debug:
-            print(f"  Got {len(results)} pages, size={data.get('size', 0)}")
-        
-        for item in results:
-            page_id = item.get("id")
-            title = item.get("title", "Unknown")
-            if page_id:
-                pages.append({
-                    "id": page_id,
-                    "title": title,
-                })
-        
-        # Check if there are more pages
-        links = data.get("_links", {})
-        if "next" not in links or len(results) < limit:
-            break
-        start += limit
-    
-    return pages
-
-
 def get_all_space_page_ids(confluence, space_key, debug=False):
     """
-    Get all page IDs in a space using both CQL and Content API methods.
+    Get all page IDs in a space using the library's get_all_pages_from_space method.
     
-    This combines results from both methods to maximize coverage of pages
-    that may have restricted permissions.
+    This is the single path for getting all pages in a space.
     
     Returns list of page IDs (strings).
     """
-    all_ids = set()
-    
-    # Method 1: CQL
-    cql = f'space = "{space_key}" AND type = page'
     if debug:
-        print(f"  CQL query: {cql}")
-    cql_count = 0
-    for item in _paginate_cql(confluence, cql):
-        content = item.get("content", item)
-        page_id = content.get("id")
-        if page_id:
-            all_ids.add(str(page_id))
-            cql_count += 1
-    if debug:
-        print(f"  CQL found: {cql_count} pages")
+        print(f"  Fetching pages from space: {space_key}")
     
-    # Method 2: Content API
-    content_pages = list_pages_in_space_via_content_api(confluence, space_key, debug=debug)
-    content_count = 0
-    for p in content_pages:
-        if p.get('id'):
-            pid = str(p['id'])
-            if pid not in all_ids:
-                content_count += 1
-            all_ids.add(pid)
-    if debug:
-        print(f"  Content API added: {content_count} additional pages")
-        print(f"  Total unique pages: {len(all_ids)}")
-    
-    return list(all_ids)
-
-
-def list_pages_in_space(confluence, space_key, debug=False):
-    """
-    List all pages in a space using CQL.
-    
-    Note: CQL and listing APIs only return pages the user has permission to see.
-    The admin key header only helps when directly accessing pages by ID.
-    
-    Returns list of dicts with id, title info.
-    """
-    cql = f'space = "{space_key}" AND type = page ORDER BY title'
-    if debug:
-        print(f"  CQL: {cql}")
-    
-    pages = []
-    for item in _paginate_cql(confluence, cql, debug=debug):
-        # CQL results have page data inside 'content' wrapper
-        content = item.get("content", item)
-        page_id = content.get("id")
-        title = item.get("title") or content.get("title", "Unknown")
-        if page_id:
-            pages.append({
-                "id": page_id,
-                "title": title,
-            })
-    return pages
+    try:
+        pages = confluence.get_all_pages_from_space(
+            space=space_key,
+            start=0,
+            limit=500,
+            expand='version'
+        )
+        page_ids = [str(p.get('id')) for p in pages if p.get('id')]
+        if debug:
+            print(f"  Found {len(page_ids)} pages")
+        return page_ids
+    except Exception as e:
+        if debug:
+            print(f"  Error fetching pages: {e}")
+        return []
 
 
 def print_space_pages(confluence, space_key, base_url, debug=False):
@@ -1185,55 +1059,33 @@ def create_personal_space(confluence, account_id: str, display_name: str = None)
 
 def move_page_to_space(confluence, page_id: str, dst_space_key: str, dst_parent_id: str = None) -> tuple:
     """
-    Move a page to a different space.
+    Move a page to a different space by updating it with the new space key.
+    
+    Note: The /move/ endpoint only works for same-space reorganization.
+    For cross-space moves, we update the page with the new space key.
     
     Returns (success: bool, message: str)
     """
     try:
         base_url = confluence.url.rstrip('/')
-        if base_url.endswith('/wiki'):
-            api_url = f"{base_url}/api/v2/pages/{page_id}/move"
-        else:
-            api_url = f"{base_url}/wiki/api/v2/pages/{page_id}/move"
+        if not base_url.endswith('/wiki'):
+            base_url = base_url + '/wiki'
         
-        payload = {
-            "spaceId": None,  # Will be filled in
-            "targetKey": dst_space_key
-        }
-        
-        # Get the destination space ID
-        try:
-            dst_space = confluence.get_space(dst_space_key)
-            if dst_space:
-                space_id = dst_space.get('id')
-                if space_id:
-                    payload["spaceId"] = space_id
-        except Exception:
-            pass
-        
-        # If we have a parent, set it
-        if dst_parent_id:
-            payload["parentId"] = dst_parent_id
-        
-        # Try using the move endpoint (Confluence Cloud)
-        response = confluence._session.post(api_url, json=payload)
-        if response.status_code in (200, 201, 204):
-            return True, "moved"
-        
-        # Fallback: Update page with new space using v1 API
-        # Get the page first
+        # Get the page details
         page = confluence.get_page_by_id(page_id, expand='body.storage,version,space')
         if not page:
             return False, "Page not found"
+        
+        current_space = page.get('space', {}).get('key', '')
+        if current_space == dst_space_key:
+            return False, "skipped - page already in destination space"
         
         title = page.get('title')
         body = page.get('body', {}).get('storage', {}).get('value', '')
         version = page.get('version', {}).get('number', 1)
         
-        # Use the v1 API to update page with new space
-        update_url = f"{confluence.url.rstrip('/')}/rest/api/content/{page_id}"
-        if not confluence.url.rstrip('/').endswith('/wiki'):
-            update_url = f"{confluence.url.rstrip('/')}/wiki/rest/api/content/{page_id}"
+        # Update page with new space using PUT
+        update_url = f"{base_url}/rest/api/content/{page_id}"
         
         update_payload = {
             "type": "page",
@@ -1248,18 +1100,33 @@ def move_page_to_space(confluence, page_id: str, dst_space_key: str, dst_parent_
             "version": {"number": version + 1}
         }
         
+        # Set parent in destination space
         if dst_parent_id:
             update_payload["ancestors"] = [{"id": dst_parent_id}]
         
         response = confluence._session.put(update_url, json=update_payload)
+        
         if response.status_code in (200, 201):
-            return True, "moved via update"
+            # Verify the move actually happened
+            try:
+                verify_page = confluence.get_page_by_id(page_id, expand='space')
+                if verify_page:
+                    actual_space = verify_page.get('space', {}).get('key', '')
+                    if actual_space == dst_space_key:
+                        return True, "moved"
+                    else:
+                        return False, f"API success but page still in {actual_space}"
+            except Exception:
+                return True, "moved (unverified)"
         else:
-            error_text = response.text[:300]
+            error_text = response.text[:300] if response.text else ""
             # Check if page already exists in destination
             if 'content with the name' in error_text.lower() or 'already exists' in error_text.lower():
-                return True, "skipped - already exists in destination"
-            return False, f"HTTP {response.status_code}: {error_text}"
+                return False, "skipped - page with same title already exists in destination"
+            # Check for permission errors
+            if 'permission' in error_text.lower() or 'forbidden' in error_text.lower() or response.status_code == 403:
+                return False, f"permission denied"
+            return False, f"HTTP {response.status_code}: {error_text[:150]}"
             
     except Exception as e:
         error_str = str(e)
@@ -1267,6 +1134,66 @@ def move_page_to_space(confluence, page_id: str, dst_space_key: str, dst_parent_
         if 'content with the name' in error_str.lower() or 'already exists' in error_str.lower():
             return True, "skipped - already exists in destination"
         return False, error_str
+
+
+def _write_failed_pages_html(filename: str, src_key: str, dst_key: str, failed_pages: list, base_url: str):
+    """
+    Write an HTML file with links to failed pages for manual review.
+    """
+    html_content = f"""<!DOCTYPE html>
+<html>
+<head>
+    <title>Failed Page Moves - {src_key}</title>
+    <style>
+        body {{ font-family: Arial, sans-serif; margin: 20px; }}
+        h1 {{ color: #333; }}
+        .info {{ background: #f0f0f0; padding: 10px; margin-bottom: 20px; }}
+        table {{ border-collapse: collapse; width: 100%; }}
+        th, td {{ border: 1px solid #ddd; padding: 8px; text-align: left; }}
+        th {{ background-color: #4CAF50; color: white; }}
+        tr:nth-child(even) {{ background-color: #f2f2f2; }}
+        a {{ color: #0066cc; }}
+    </style>
+</head>
+<body>
+    <h1>Failed Page Moves</h1>
+    <div class="info">
+        <p><strong>Source Space:</strong> {src_key}</p>
+        <p><strong>Destination Space:</strong> {dst_key}</p>
+        <p><strong>Failed Pages:</strong> {len(failed_pages)}</p>
+    </div>
+    <table>
+        <tr>
+            <th>Page Title</th>
+            <th>Page ID</th>
+            <th>Error</th>
+        </tr>
+"""
+    
+    for page in failed_pages:
+        title = page.get('title', 'Unknown')
+        page_id = page.get('id', '')
+        error = page.get('error', '')
+        url = page.get('url', f"{base_url}/pages/{page_id}")
+        
+        # Escape HTML characters
+        title_escaped = title.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+        error_escaped = error.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+        
+        html_content += f"""        <tr>
+            <td><a href="{url}" target="_blank">{title_escaped}</a></td>
+            <td>{page_id}</td>
+            <td>{error_escaped}</td>
+        </tr>
+"""
+    
+    html_content += """    </table>
+</body>
+</html>
+"""
+    
+    with open(filename, 'w', encoding='utf-8') as f:
+        f.write(html_content)
 
 
 def move_personal_space(confluence, src_account_id: str, dst_account_id: str,
@@ -1338,8 +1265,6 @@ def move_personal_space(confluence, src_account_id: str, dst_account_id: str,
     if not all_pages:
         return True, "No pages found in source space", 0
     
-    print(f"Found {len(all_pages)} total pages to move")
-    
     # Build a map of old page IDs to track hierarchy
     # Sort pages by ancestor count (parents first, then children)
     def ancestor_count(page):
@@ -1353,6 +1278,12 @@ def move_personal_space(confluence, src_account_id: str, dst_account_id: str,
     moved = 0
     skipped = 0
     failed = 0
+    failed_pages = []  # Track failed pages for HTML report
+    
+    # Get base URL for links
+    base_url = confluence.url.rstrip('/')
+    if not base_url.endswith('/wiki'):
+        base_url = base_url + '/wiki'
     
     for page in all_pages:
         page_id = page.get('id')
@@ -1373,17 +1304,29 @@ def move_personal_space(confluence, src_account_id: str, dst_account_id: str,
         else:
             success, msg = move_page_to_space(confluence, page_id, dst_key, dst_parent_id)
             if success:
-                if 'skipped' in msg:
-                    print(f"  Skipped (exists): {title}")
-                    skipped += 1
-                else:
-                    print(f"  Moved: {title}")
-                    moved += 1
+                print(f"  Moved: {title}")
+                moved += 1
                 # The page keeps its ID after move
+                id_mapping[page_id] = page_id
+            elif 'already exists' in msg:
+                print(f"  Skipped (exists): {title}")
+                skipped += 1
                 id_mapping[page_id] = page_id
             else:
                 print(f"  FAILED to move: {title} - {msg}")
                 failed += 1
+                failed_pages.append({
+                    'id': page_id,
+                    'title': title,
+                    'error': msg,
+                    'url': f"{base_url}/pages/{page_id}"
+                })
+    
+    # Write HTML file with failed pages if any
+    if failed_pages and not dry_run:
+        html_filename = f"{src_key.replace('~', '')}_failed.html"
+        _write_failed_pages_html(html_filename, src_key, dst_key, failed_pages, base_url)
+        print(f"\nFailed pages written to: {html_filename}")
     
     return True, f"Moved {moved} pages, skipped {skipped} (already exist), failed {failed}", moved
 
