@@ -37,7 +37,7 @@ from opsMiles.confluence import (
     process_space, process_spaces, process_single_page, get_confluence_client, update_space_ownership,
     extract_page_id_from_url, extract_space_key_from_url, get_page_owner, set_page_owner, add_user_to_update_restriction,
     transfer_personal_space, list_spaces, list_pages_in_space, replace_pages, update_single_page,
-    replace_user_in_page, replace_user_in_space, print_space_pages, get_personal_space
+    replace_user_in_page, replace_user_in_space, print_space_pages, get_personal_space, move_personal_space
 )
 
 
@@ -124,10 +124,11 @@ def main(argv=None):
     p.add_argument('--transferDashboards', nargs=2, metavar=('SRC','DST'), help='Transfer all Jira dashboards from SRC to DST accountId')
     p.add_argument('--copyDashboard', nargs=3, metavar=('DASH_ID', 'SRC', 'DST'), help='Copy a single dashboard by ID from SRC to DST user (for debugging)')
     p.add_argument('--transferSpace', nargs=2, metavar=('SRC','DST'), help='Transfer ownership and move pages from SRC\'s personal space to DST')
+    p.add_argument('--movePages', nargs=2, metavar=('SRC','DST'), help='Move pages from SRC\'s personal space to DST\'s personal space (no ownership transfer)')
+    p.add_argument('--jsonToHtml', metavar='JSON_FILE', help='Convert Confluence JSON (from /content/page API) to HTML file with page links')
     p.add_argument('--updateSpaceOwnership', metavar='ACCOUNT_ID', help='Update ownership of all pages in user\'s personal space to that user')
     p.add_argument('--processConfluence', nargs=2, metavar=('SRC','DST'), help='Process Confluence spaces: transfer edit perms, watchers, and ownership from SRC to DST')
-    p.add_argument('--srcUsername', help='Username for SRC personal space lookup (e.g., ykang)')
-    p.add_argument('--dstUsername', help='Username for DST personal space lookup')
+
     p.add_argument('--moveuser', nargs=2, metavar=('SRC','DST'), help=' Copy groups, reassign tickets and copy watcher from  DST accountId to SRC accountId')
     p.add_argument('--predicate', help=' partial predicate to pass to jira  like "and project=SE"')
     p.add_argument('--spaces', nargs='+', help='Space names for --processConfluence or --moveuser (e.g., DM EPO LSSTOps). Omit to scan all spaces.')
@@ -221,8 +222,6 @@ def main(argv=None):
         # Transfer personal space ownership and move pages
         success, msg, ps_counts = transfer_personal_space(
             config, confluence, src, dst,
-            src_username=getattr(args, 'srcUsername', None),
-            dst_username=getattr(args, 'dstUsername', None),
             jira=jira,
             dry_run=dry_run
         )
@@ -336,12 +335,79 @@ def main(argv=None):
         jira = get_jira_from_config(config)
         success, msg, counts = transfer_personal_space(
             config, confluence, src, dst,
-            src_username=getattr(args, 'srcUsername', None),
-            dst_username=getattr(args, 'dstUsername', None),
             jira=jira,
             dry_run=getattr(args, 'dry_run', False)
         )
         print(msg)
+        ok = True
+
+    if getattr(args, 'movePages', None):
+        src, dst = args.movePages
+        confluence = get_confluence_client(config)
+        jira = get_jira_from_config(config)
+        success, msg, moved = move_personal_space(
+            confluence, src, dst,
+            jira=jira,
+            dry_run=getattr(args, 'dry_run', False)
+        )
+        print(msg)
+        ok = True
+
+    if getattr(args, 'jsonToHtml', None):
+        json_file = args.jsonToHtml
+        try:
+            with open(json_file, 'r') as f:
+                data = json.load(f)
+        except Exception as e:
+            print(f"Failed to load JSON file: {e}")
+            sys.exit(1)
+        
+        results = data.get("results", [])
+        if not results:
+            print("No pages found in JSON file")
+            sys.exit(1)
+        
+        # Generate HTML
+        base_url = "https://rubinobs.atlassian.net/wiki"
+        html_file = json_file.rsplit('.', 1)[0] + '.html'
+        
+        html_content = f"""<!DOCTYPE html>
+<html>
+<head>
+    <title>Confluence Pages</title>
+    <style>
+        body {{ font-family: Arial, sans-serif; margin: 20px; }}
+        h1 {{ color: #333; }}
+        ul {{ list-style-type: none; padding: 0; }}
+        li {{ margin: 8px 0; }}
+        a {{ color: #0052CC; text-decoration: none; }}
+        a:hover {{ text-decoration: underline; }}
+        .count {{ color: #666; margin-bottom: 20px; }}
+    </style>
+</head>
+<body>
+    <h1>Confluence Pages ({len(results)} pages)</h1>
+    <p class="count">Generated from: {json_file}</p>
+    <ul>
+"""
+        for page in results:
+            title = page.get('title', 'Unknown')
+            page_id = page.get('id', '')
+            webui = page.get('_links', {}).get('webui', '')
+            if webui:
+                full_url = base_url + webui
+            else:
+                full_url = f"{base_url}/pages/{page_id}"
+            html_content += f'        <li><a href="{full_url}" target="_blank">{title}</a></li>\n'
+        
+        html_content += """    </ul>
+</body>
+</html>
+"""
+        with open(html_file, 'w') as f:
+            f.write(html_content)
+        
+        print(f"Created {html_file} with {len(results)} page links")
         ok = True
 
     if getattr(args, 'updateSpaceOwnership', None):
@@ -350,7 +416,6 @@ def main(argv=None):
         jira = get_jira_from_config(config)
         success, msg = update_space_ownership(
             confluence, account_id,
-            username=getattr(args, 'srcUsername', None),
             jira=jira,
             dry_run=getattr(args, 'dry_run', False)
         )
@@ -373,15 +438,15 @@ def main(argv=None):
         elif account.startswith('~'):
             space_key = account
         else:
-            # Look up personal space by account ID or username
-            space = get_personal_space(confluence, account, account, jira=jira)
+            # Look up personal space by account ID
+            space = get_personal_space(confluence, account, jira=jira)
             if not space:
                 print(f"Could not find personal space for: {account}")
                 sys.exit(1)
             space_key = space.get("key")
             print(f"Found personal space: {space.get('name')} ({space_key})")
         
-        print_space_pages(confluence, space_key, base_url)
+        print_space_pages(confluence, space_key, base_url, debug=True)
         ok = True
 
     if getattr(args, 'list_space', None):
