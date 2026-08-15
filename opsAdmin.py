@@ -37,7 +37,8 @@ from opsMiles.confluence import (
     process_space, process_spaces, process_single_page, get_confluence_client, update_space_ownership,
     extract_page_id_from_url, extract_space_key_from_url, get_page_owner, set_page_owner, add_user_to_update_restriction,
     transfer_personal_space, list_spaces, replace_pages, update_single_page,
-    replace_user_in_page, replace_user_in_space, print_space_pages, get_personal_space, move_personal_space
+    replace_user_in_page, replace_user_in_space, print_space_pages, get_personal_space, move_personal_space,
+    move_page_to_space
 )
 
 
@@ -118,7 +119,6 @@ def main(argv=None):
     p.add_argument('--copyWatcher', nargs=2, metavar=('SRC','DST'), help=' Make  DST accountId watch all tickets  watched by SRC accountId')
     p.add_argument('--copyReporter', nargs=2, metavar=('SRC','DST'), help='Change reporter from SRC to DST on all issues reported by SRC')
     p.add_argument('--assignReviewer', nargs=2, metavar=('SRC','DST'), help='Change reviewer from SRC to DST on all issues where SRC is reviewer')
-    p.add_argument('--reviewerField', default='Reviewer', help='Name of the reviewer field in Jira (default: Reviewer)')
     p.add_argument('--listUserFields', action='store_true', help='List all user-type fields in Jira')
     p.add_argument('--transferFilters', nargs=2, metavar=('SRC','DST'), help='Transfer all Jira filters owned by SRC to DST accountId')
     p.add_argument('--transferDashboards', nargs=2, metavar=('SRC','DST'), help='Transfer all Jira dashboards from SRC to DST accountId')
@@ -216,7 +216,7 @@ def main(argv=None):
         summary['dashboards_copied'] = copied
         summary['watched'] = copy_watcher(config, src, dst, pred)
         summary['reporter_changed'] = copy_reporter(config, src, dst, dry_run, pred)
-        summary['reviewer_changed'] = copy_reviewer(config, src, dst, dry_run, pred, getattr(args, 'reviewerField', 'Reviewer'))
+        summary['reviewer_changed'] = copy_reviewer(config, src, dst, dry_run, pred, 'Reviewer')
         summary['reassigned'] = reassign(config, src, dst, dry_run, pred)
         confluence = get_confluence_client(config)
         # Transfer personal space ownership and move pages
@@ -285,8 +285,7 @@ def main(argv=None):
     # copy reviewer operation
     if getattr(args, 'assignReviewer', None):
         src, dst = args.assignReviewer
-        field_name = getattr(args, 'reviewerField', 'Reviewer')
-        copy_reviewer(config, src, dst, getattr(args, 'dry_run', False), pred, field_name)
+        copy_reviewer(config, src, dst, getattr(args, 'dry_run', False), pred, 'Reviewer')
         ok = True
 
     if getattr(args, 'transferFilters', None):
@@ -345,12 +344,43 @@ def main(argv=None):
         src, dst = args.movePages
         confluence = get_confluence_client(config)
         jira = get_jira_from_config(config)
-        success, msg, moved = move_personal_space(
-            confluence, src, dst,
-            jira=jira,
-            dry_run=getattr(args, 'dry_run', False)
-        )
-        print(msg)
+        dry_run = getattr(args, 'dry_run', False)
+        
+        # Check if single page mode
+        page_id = getattr(args, 'pageid', None)
+        page_url = getattr(args, 'page_url', None)
+        
+        if page_id or page_url:
+            # Single page move
+            if page_url:
+                page_id = extract_page_id_from_url(page_url)
+                if not page_id:
+                    print(f"Could not extract page ID from URL: {page_url}")
+                    sys.exit(1)
+            
+            # Get destination space key
+            dst_space = get_personal_space(confluence, dst, jira=jira)
+            if not dst_space:
+                print(f"Could not find personal space for: {dst}")
+                sys.exit(1)
+            dst_key = dst_space.get('key')
+            
+            if dry_run:
+                print(f"Would move page {page_id} to space {dst_key}")
+            else:
+                success, msg = move_page_to_space(confluence, page_id, dst_key)
+                if success:
+                    print(f"Moved page {page_id} to {dst_key}")
+                else:
+                    print(f"Failed to move page: {msg}")
+        else:
+            # Move all pages from source space
+            success, msg, moved = move_personal_space(
+                confluence, src, dst,
+                jira=jira,
+                dry_run=dry_run
+            )
+            print(msg)
         ok = True
 
     if getattr(args, 'jsonToHtml', None):

@@ -821,7 +821,7 @@ def print_space_pages(confluence, space_key, base_url, debug=False):
     
     print(f"\nFound {len(pages)} pages:\n")
     for page in pages:
-        page_url = f"{base_url}/wiki/pages/{page['id']}"
+        page_url = f"{base_url}/wiki/spaces/{space_key}/pages/{page['id']}"
         print(f"  {page['title']}")
         print(f"    {page_url}")
     return pages
@@ -1328,7 +1328,7 @@ def move_personal_space(confluence, src_account_id: str, dst_account_id: str,
                     'id': page_id,
                     'title': title,
                     'error': msg,
-                    'url': f"{base_url}/pages/{page_id}"
+                    'url': f"{base_url}/spaces/{src_key}/pages/{page_id}"
                 })
     
     # Write HTML file with failed pages if any
