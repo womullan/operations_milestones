@@ -827,6 +827,142 @@ def print_space_pages(confluence, space_key, base_url, debug=False):
     return pages
 
 
+def check_pages_uniqueness(confluence, src_space_key: str, dst_space_key: str, base_url: str):
+    """
+    Check which pages in src_space exist (by title) in dst_space.
+    Outputs an HTML file with unique and duplicate pages separated.
+    
+    Returns tuple (unique_pages, duplicate_pages)
+    """
+    print(f"\nFetching pages from source space: {src_space_key}")
+    page_ids = get_all_space_page_ids(confluence, src_space_key, debug=True)
+    
+    unique_pages = []
+    duplicate_pages = []
+    
+    print(f"\nChecking {len(page_ids)} pages against destination space: {dst_space_key}")
+    
+    for i, page_id in enumerate(page_ids):
+        if (i + 1) % 10 == 0:
+            print(f"  Checked {i + 1}/{len(page_ids)} pages...")
+        
+        try:
+            page = confluence.get_page_by_id(page_id)
+            title = page.get('title', f'Page {page_id}')
+            page_info = {
+                'id': page_id,
+                'title': title,
+                'url': f"{base_url}/wiki/spaces/{src_space_key}/pages/{page_id}"
+            }
+            
+            # Check if page with same title exists in destination
+            exists, dst_id = page_exists_in_space(confluence, title, dst_space_key)
+            
+            if exists:
+                page_info['dst_url'] = f"{base_url}/wiki/spaces/{dst_space_key}/pages/{dst_id}" if dst_id else ""
+                duplicate_pages.append(page_info)
+            else:
+                unique_pages.append(page_info)
+                
+        except Exception as e:
+            print(f"  Warning: could not check page {page_id}: {e}")
+    
+    print(f"\nResults:")
+    print(f"  Unique pages (can be moved): {len(unique_pages)}")
+    print(f"  Duplicate pages (title exists in destination): {len(duplicate_pages)}")
+    
+    # Generate HTML file
+    html_filename = f"{src_space_key.replace('~', '')}_uniqueness.html"
+    _write_uniqueness_html(html_filename, src_space_key, dst_space_key, unique_pages, duplicate_pages)
+    print(f"\nHTML report written to: {html_filename}")
+    
+    return unique_pages, duplicate_pages
+
+
+def _write_uniqueness_html(filename: str, src_space: str, dst_space: str, unique_pages: list, duplicate_pages: list):
+    """
+    Write an HTML file showing unique and duplicate pages.
+    """
+    html_content = f"""<!DOCTYPE html>
+<html>
+<head>
+    <title>Page Uniqueness Check - {src_space}</title>
+    <style>
+        body {{ font-family: Arial, sans-serif; margin: 20px; }}
+        h1, h2 {{ color: #333; }}
+        .info {{ background: #f0f0f0; padding: 10px; margin-bottom: 20px; }}
+        .unique {{ background: #e8f5e9; }}
+        .duplicate {{ background: #ffebee; }}
+        table {{ border-collapse: collapse; width: 100%; margin-bottom: 30px; }}
+        th, td {{ border: 1px solid #ddd; padding: 8px; text-align: left; }}
+        th {{ background-color: #4CAF50; color: white; }}
+        .duplicate th {{ background-color: #f44336; }}
+        tr:nth-child(even) {{ background-color: #f9f9f9; }}
+        a {{ color: #0066cc; }}
+    </style>
+</head>
+<body>
+    <h1>Page Uniqueness Check</h1>
+    <div class="info">
+        <p><strong>Source Space:</strong> {src_space}</p>
+        <p><strong>Destination Space:</strong> {dst_space}</p>
+        <p><strong>Unique Pages:</strong> {len(unique_pages)} (can be moved)</p>
+        <p><strong>Duplicate Pages:</strong> {len(duplicate_pages)} (title exists in destination)</p>
+    </div>
+    
+    <h2 class="unique">Unique Pages ({len(unique_pages)})</h2>
+    <p>These pages can be moved - no page with the same title exists in the destination space.</p>
+    <table>
+        <tr>
+            <th>Page Title</th>
+            <th>Page ID</th>
+        </tr>
+"""
+    
+    for page in sorted(unique_pages, key=lambda x: x.get('title', '')):
+        title = page.get('title', 'Unknown').replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+        page_id = page.get('id', '')
+        url = page.get('url', '')
+        
+        html_content += f"""        <tr>
+            <td><a href="{url}" target="_blank">{title}</a></td>
+            <td>{page_id}</td>
+        </tr>
+"""
+    
+    html_content += f"""    </table>
+    
+    <h2 class="duplicate">Duplicate Pages ({len(duplicate_pages)})</h2>
+    <p>These pages have a matching title in the destination space and cannot be moved without renaming.</p>
+    <table class="duplicate">
+        <tr>
+            <th>Page Title</th>
+            <th>Source Page</th>
+            <th>Destination Page</th>
+        </tr>
+"""
+    
+    for page in sorted(duplicate_pages, key=lambda x: x.get('title', '')):
+        title = page.get('title', 'Unknown').replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+        src_url = page.get('url', '')
+        dst_url = page.get('dst_url', '')
+        
+        html_content += f"""        <tr>
+            <td>{title}</td>
+            <td><a href="{src_url}" target="_blank">Source</a></td>
+            <td><a href="{dst_url}" target="_blank">Destination</a></td>
+        </tr>
+"""
+    
+    html_content += """    </table>
+</body>
+</html>
+"""
+    
+    with open(filename, 'w', encoding='utf-8') as f:
+        f.write(html_content)
+
+
 def page_is_favourited(confluence, base_url, account_id, page_id):
     """
     True iff account_id has favourited page_id.
@@ -1057,6 +1193,31 @@ def create_personal_space(confluence, account_id: str, display_name: str = None)
         return False, str(e)
 
 
+def page_exists_in_space(confluence, title: str, space_key: str) -> tuple:
+    """
+    Check if a page with the given title exists in the specified space.
+    
+    Returns (exists: bool, page_id: str or None)
+    """
+    try:
+        # Escape quotes in title for CQL
+        escaped_title = title.replace('"', '\\"')
+        cql = f'space = "{space_key}" AND title = "{escaped_title}" AND type = page'
+        existing = confluence.cql(cql, limit=1)
+        
+        if existing.get('results'):
+            dst_page = existing['results'][0]
+            # CQL results can have ID at different levels - check all possibilities
+            dst_id = (dst_page.get('content', {}).get('id') or 
+                      dst_page.get('id') or 
+                      dst_page.get('content', {}).get('content', {}).get('id') or
+                      '')
+            return True, str(dst_id) if dst_id else None
+        return False, None
+    except Exception:
+        return False, None
+
+
 def move_page_to_space(confluence, page_id: str, dst_space_key: str, dst_parent_id: str = None) -> tuple:
     """
     Move a page to a different space by updating it with the new space key.
@@ -1085,13 +1246,9 @@ def move_page_to_space(confluence, page_id: str, dst_space_key: str, dst_parent_
         version = page.get('version', {}).get('number', 1)
         
         # Check if a page with the same title already exists in destination space
-        try:
-            cql = f'space = "{dst_space_key}" AND title = "{title}" AND type = page'
-            existing = confluence.cql(cql, limit=1)
-            if existing.get('results'):
-                return False, "skipped - same title exists in destination"
-        except Exception:
-            pass  # Continue with move attempt if check fails
+        exists, _ = page_exists_in_space(confluence, title, dst_space_key)
+        if exists:
+            return False, "skipped - same title exists in destination"
         
         # Update page with new space using PUT
         update_url = f"{base_url}/rest/api/content/{page_id}"

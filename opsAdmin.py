@@ -136,6 +136,7 @@ def main(argv=None):
     p.add_argument('--page-url', help='Process a single Confluence page by URL (use with --processConfluence)')
 
     p.add_argument('--list-personal-pages', metavar='ACCOUNT', help='List all pages in a personal space (account ID, username, or space URL)')
+    p.add_argument('--unique', metavar='DST_SPACE', help='With --list-personal-pages: check if pages exist in destination space, output HTML with unique/duplicate sections')
     p.add_argument('--list-space', metavar='SPACE', help='List all pages in a space (space key like "LSSTOps" or space URL)')
     p.add_argument('--list-spaces', action='store_true', help='List all Confluence spaces (excludes personal spaces)')
     p.add_argument('--replace-text', action='store_true', help='Search and replace text in Confluence pages (requires --search-string and --replace-string)')
@@ -476,7 +477,25 @@ def main(argv=None):
             space_key = space.get("key")
             print(f"Found personal space: {space.get('name')} ({space_key})")
         
-        print_space_pages(confluence, space_key, base_url, debug=True)
+        # Check for --unique flag
+        dst_account = getattr(args, 'unique', None)
+        if dst_account:
+            from opsMiles.confluence import check_pages_uniqueness
+            # Look up destination space key from account ID (like movePages does)
+            if dst_account.startswith('~'):
+                dst_space_key = dst_account
+            else:
+                dst_space = get_personal_space(confluence, dst_account, jira=jira)
+                if not dst_space:
+                    print(f"Could not find personal space for destination: {dst_account}")
+                    sys.exit(1)
+                dst_space_key = dst_space.get('key')
+                print(f"Found destination space: {dst_space.get('name')} ({dst_space_key})")
+            
+            print(f"\nChecking uniqueness against destination space: {dst_space_key}")
+            check_pages_uniqueness(confluence, space_key, dst_space_key, base_url)
+        else:
+            print_space_pages(confluence, space_key, base_url, debug=True)
         ok = True
 
     if getattr(args, 'list_space', None):
