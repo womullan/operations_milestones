@@ -96,31 +96,27 @@ def output(miles, mode, fname="milestones", caption=None, split=False):
         output(doneMiles,mode, "doneMilestones", caption=caption, split=False)
         return
 
-    cols = ["Milestone", "Jira ID", "Rubin ID", "Due Date", "Level", "Status", "RubinTeam"]
+    cols = ["Milestone", "Jira ID", "Due Date", "Level", "Status", "RubinTeam"]
     tout = sys.stdout
     sep = "\t"
     if mode == "tex":
         print(f"Create tex table {fname}")
         tout = open(fname + '.tex', 'w')
-        cap = "Milestones for Rubin Observatory Data Management " \
-              "and System Performance "
+        cap = "Milestones for Rubin Observatory Data Management "
         if caption:
             cap = caption
-        form = r"|p{0.3\textwidth}  |r  |r  |r  |r |l |p{0.1\textwidth} |"
+        form = r"|p{0.3\textwidth}  |r  |r  |r |l |p{0.1\textwidth} |"
         outhead(cols, tout=tout, cap=cap, name=fname, form=form)
         sep = "&"
 
     for m in miles:
         key = m.key
         sumry = m.fields.summary
-        milestone_id = m.fields.customfield_10105
-        if milestone_id is None:
-            milestone_id = "not set"
         due = m.fields.duedate
         lev = m.fields.customfield_10037
         team = m.fields.customfield_10056
         status = m.fields.status
-        outputrow(tout, sep, sumry, key, milestone_id, due, lev, team, status, mode)
+        outputrow(tout, sep, sumry, key, due, lev, team, status, mode)
 
     if mode == "tex":
         complete_and_close_table(tout)
