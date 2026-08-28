@@ -33,13 +33,19 @@ def list_milestones(jira=None, pred2='and (component in ("Data Management", '
     Get the milestone issues from Jira.
     Defaults to Data Management and System Performance
     set pred2="" to get all
+    
+    If pred2 contains "filter=" it will be used as the complete query without modification.
     """
-
     fields = MFIELDS
-    query = 'type in ("L1 Milestone", "L2 Milestone", "L3 Milestone") ' + pred2
-    query = query  +  " order by duedate asc"
+    
+    # If using a filter, use it as-is without modification
+    if pred2 and 'filter=' in pred2.lower():
+        query = pred2
+    else:
+        query = 'type in ("L1 Milestone", "L2 Milestone", "L3 Milestone") ' + pred2
+        query = query + " order by duedate asc"
 
-    r = jira.search_issues(jql_str=query, fields=fields,  maxResults=500)
+    r = jira.search_issues(jql_str=query, fields=fields, maxResults=500)
     return r
 
 
@@ -81,14 +87,20 @@ def list_jira_issues(jira, pred2=None, query=None, order="order by duedate asc",
     :String query: Query string "
     :String pred2: If you use the defualt query string but want to
                     add more predicate or sort order start with AND or OR
+    
+    If query contains "filter=" it will be used as-is without adding predicates or order.
     """
-    if query is None:
-        query = """resolution = Unresolved AND
-                   (type = epic or type= story) AND labels is not EMPTY """
-
-    if (pred2 is not None):
-        query = query + " " + pred2
-    query = query + " " + order
+    # If using a filter, use it as-is without modification
+    if query and 'filter=' in query.lower():
+        pass  # use query as-is
+    else:
+        if query is None:
+            query = """resolution = Unresolved AND
+                       (type = epic or type= story) AND labels is not EMPTY """
+        if pred2 is not None:
+            query = query + " " + pred2
+        query = query + " " + order
+    
     print(f"Query:{query}")
     r = jira.search_issues(jql_str=query, fields=fields, maxResults=False)
     return r

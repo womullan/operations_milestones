@@ -252,34 +252,35 @@ if __name__ == '__main__':
     user, pw, jira = get_jira(user, args.ask, args.passwd)
 
     if args.gantt:
-        fname="USDFplan.tex"
-        if args.fname:
-            fname=args.fname
-        start=2021
-        if args.year:
-            start=args.year
+        fname = args.fname if args.fname else "USDFplan.tex"
+        start = args.year if args.year else 2021
         gantt(fname, list_jira_issues(jira, args.query, ""), start=start)
         exit(0)
 
     if args.jor:
-        jor("jor.csv")
+        fname = args.fname if args.fname else "jor.csv"
+        jor(fname)
         exit(0)
 
     if args.pop:
-        pop("pop.csv")
+        fname = args.fname if args.fname else "pop.csv"
+        pop(fname)
         exit(0)
 
     if args.dump:
-        dump("jira.csv", args)
+        fname = args.fname if args.fname else "jira.csv"
+        dump(fname, args)
         exit(0)
 
     if args.tickets:
+        fname = args.fname if args.fname else "tickets"
         output(list_jira_issues(jira, args.query, ""), args.mode,
-               caption=args.caption, split=args.split)
+               fname=fname, caption=args.caption, split=args.split)
         exit(0)
 
     if args.list:
+        fname = args.fname if args.fname else "milestones"
         output(list_milestones(jira, args.query), args.mode,
-               caption=args.caption, split=args.split)
+               fname=fname, caption=args.caption, split=args.split)
     else:
         update_tickets_j(jira, report=args.report)
